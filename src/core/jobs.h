@@ -62,7 +62,11 @@ struct _starpu_data_descr {
 
 /* A job is the internal representation of a task. */
 LIST_TYPE(_starpu_job,
-
+	/* penalty associated with argo (pre)fetched*/
+					float argo_penalty;
+					char argo_cached;
+					char argo_prefetched;
+				
 	/* Each job is attributed a unique id. */
 	unsigned long job_id;
 

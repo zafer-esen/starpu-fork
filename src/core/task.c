@@ -34,6 +34,7 @@
 #include <core/debug.h>
 #include <time.h>
 #include <signal.h>
+#include "argo.h"
 #ifdef STARPU_HAVE_WINDOWS
 #include <windows.h>
 #endif
@@ -145,7 +146,7 @@ void starpu_task_clean(struct starpu_task *task)
 struct starpu_task * STARPU_ATTRIBUTE_MALLOC starpu_task_create(void)
 {
 	struct starpu_task *task;
-
+	//	//_STARPU_DISP("CREATING TASK\n");
 	task = (struct starpu_task *) malloc(sizeof(struct starpu_task));
 	STARPU_ASSERT(task);
 
@@ -248,7 +249,7 @@ int _starpu_submit_job(struct _starpu_job *j)
 {
 
 	struct starpu_task *task = j->task;
-
+	//_STARPU_DISP("_starpu submit job1\n");
 	_STARPU_LOG_IN();
 	/* notify bound computation of a new task */
 	_starpu_bound_record(j);
@@ -276,7 +277,7 @@ int _starpu_submit_job(struct _starpu_job *j)
 		_STARPU_TRACE_HYPERVISOR_END();
 	}
 #endif//STARPU_USE_SC_HYPERVISOR
-
+	//_STARPU_DISP("_starpu submit job2\n");
 	/* We retain handle reference count */
 	if (task->cl)
 	{
@@ -289,11 +290,11 @@ int _starpu_submit_job(struct _starpu_job *j)
 			_starpu_spin_unlock(&handle->header_lock);
 		}
 	}
-
+	//_STARPU_DISP("_starpu submit job3\n");
 	STARPU_PTHREAD_MUTEX_LOCK(&j->sync_mutex);
 
 	_starpu_handle_job_submission(j);
-
+	//_STARPU_DISP("_starpu submit job4\n");
 	int ret = _starpu_enforce_deps_and_schedule(j);
 
 	_STARPU_LOG_OUT();
@@ -316,7 +317,7 @@ void _starpu_codelet_check_deprecated_fields(struct starpu_codelet *cl)
 	/* CPU */
 	if (cl->cpu_func && cl->cpu_func != STARPU_MULTIPLE_CPU_IMPLEMENTATIONS && cl->cpu_funcs[0])
 	{
-		_STARPU_DISP("[warning] [struct starpu_codelet] both cpu_func and cpu_funcs are set. Ignoring cpu_func.\n");
+		//_STARPU_DISP("[warning] [struct starpu_codelet] both cpu_func and cpu_funcs are set. Ignoring cpu_func.\n");
 		cl->cpu_func = STARPU_MULTIPLE_CPU_IMPLEMENTATIONS;
 	}
 	if (cl->cpu_func && cl->cpu_func != STARPU_MULTIPLE_CPU_IMPLEMENTATIONS)
@@ -636,7 +637,7 @@ int _starpu_task_submit_nodeps(struct starpu_task *task)
 	}
 
 	STARPU_PTHREAD_MUTEX_UNLOCK(&j->sync_mutex);
-
+	//_STARPU_DISP("_starpu_ submit no deps\n");
 	return _starpu_push_task(j);
 }
 

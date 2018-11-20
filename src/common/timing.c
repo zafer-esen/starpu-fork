@@ -22,6 +22,9 @@
 #include <common/timing.h>
 #include <math.h>
 
+/*argo*/
+#include "argo.h"
+
 #ifdef STARPU_SIMGRID
 #include <core/simgrid.h>
 #endif
@@ -243,8 +246,15 @@ double starpu_timing_timespec_to_us(struct timespec *ts)
 	return (1000000.0*ts->tv_sec) + (0.001*ts->tv_nsec);
 }
 
+//Just so we can call Argo to clear everything so we do not take warmup into account etc.
+void starpu_clear_dsm_state(void){
+	argo_clear_state();
+}
+
+//Maybe we want to have argotiming here, or somehow hook into here to measure better
 double starpu_timing_now(void)
 {
+	//	starpu_clear_dsm_state();
 #ifdef STARPU_SIMGRID
 	return MSG_get_clock()*1000000;
 #else

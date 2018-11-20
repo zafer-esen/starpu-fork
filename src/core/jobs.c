@@ -452,7 +452,7 @@ unsigned _starpu_enforce_deps_and_schedule(struct _starpu_job *j)
 {
 	unsigned ret;
         _STARPU_LOG_IN();
-
+	//_STARPU_DISP("_starpu_enforce_deps_and_schedule1\n");
 	/* enfore tag dependencies */
 	if (_starpu_not_all_tag_deps_are_fulfilled(j))
 	{
@@ -460,7 +460,7 @@ unsigned _starpu_enforce_deps_and_schedule(struct _starpu_job *j)
 		_STARPU_LOG_OUT_TAG("not_all_tag_deps_are_fulfilled");
 		return 0;
 	}
-
+	//_STARPU_DISP("_starpu_enforce_deps_and_schedule2\n");
 	/* enfore task dependencies */
 	if (_starpu_not_all_task_deps_are_fulfilled(j))
 	{
@@ -470,15 +470,16 @@ unsigned _starpu_enforce_deps_and_schedule(struct _starpu_job *j)
 	}
 	STARPU_PTHREAD_MUTEX_UNLOCK(&j->sync_mutex);
 
+	//_STARPU_DISP("_starpu_enforce_deps_and_schedule3\n");
 	/* enforce data dependencies */
 	if (_starpu_submit_job_enforce_data_deps(j))
 	{
 		_STARPU_LOG_OUT_TAG("enforce_data_deps");
 		return 0;
 	}
-
+	//_STARPU_DISP("_starpu_enforce_deps_and_schedule4\n");
 	ret = _starpu_push_task(j);
-
+	//_STARPU_DISP("_starpu_enforce_deps_and_schedule - end\n");
 	_STARPU_LOG_OUT();
 	return ret;
 }
@@ -499,8 +500,9 @@ unsigned _starpu_enforce_deps_starting_from_task(struct _starpu_job *j)
 	/* enforce data dependencies */
 	if (_starpu_submit_job_enforce_data_deps(j))
 		return 0;
-
+	//_STARPU_DISP("_starpu_enforce_deps_starting from task\n");
 	ret = _starpu_push_task(j);
+	//_STARPU_DISP("_starpu_enforce_deps_starting from task end\n");
 
 	return ret;
 }
@@ -530,10 +532,12 @@ int _starpu_push_local_task(struct _starpu_worker *worker, struct starpu_task *t
 		starpu_task_list_push_front(&worker->local_tasks, task);
 	else
 		starpu_task_list_push_back(&worker->local_tasks, task);
-
+	//_STARPU_DISP("_starpu_ push local task1\n");
 	STARPU_PTHREAD_COND_BROADCAST(&worker->sched_cond);
+	//_STARPU_DISP("_starpu_ push local task2\n");
 	starpu_push_task_end(task);
+	//_STARPU_DISP("_starpu_ push local task3\n");
 	STARPU_PTHREAD_MUTEX_UNLOCK(&worker->sched_mutex);
-
+	//_STARPU_DISP("_starpu_ push local task4\n");
 	return 0;
 }

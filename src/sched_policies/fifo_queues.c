@@ -37,12 +37,13 @@ struct _starpu_fifo_taskq *_starpu_create_fifo(void)
 	fifo->exp_start = starpu_timing_now();
 	fifo->exp_len = 0.0;
 	fifo->exp_end = fifo->exp_start;
-
+	fifo->resort=0;
 	return fifo;
 }
 
 void _starpu_destroy_fifo(struct _starpu_fifo_taskq *fifo)
 {
+	printf("resorted:%d\n",fifo->resort);
 	free(fifo);
 }
 
@@ -51,9 +52,12 @@ int _starpu_fifo_empty(struct _starpu_fifo_taskq *fifo)
 	return fifo->ntasks == 0;
 }
 
+
+
 int
 _starpu_fifo_push_sorted_task(struct _starpu_fifo_taskq *fifo_queue, struct starpu_task *task)
 {
+	int placement = 0;
 	struct starpu_task_list *list = &fifo_queue->taskq;
 
 	if (list->head == NULL)
@@ -79,11 +83,13 @@ _starpu_fifo_push_sorted_task(struct _starpu_fifo_taskq *fifo_queue, struct star
 
 		while (current)
 		{
+
 			if (current->priority < task->priority)
 				break;
 
 			prev = current;
 			current = current->next;
+			placement++;
 		}
 
 		if (prev == NULL)
@@ -118,7 +124,7 @@ _starpu_fifo_push_sorted_task(struct _starpu_fifo_taskq *fifo_queue, struct star
 	fifo_queue->ntasks++;
 	fifo_queue->nprocessed++;
 
-	return 0;
+	return placement;
 }
 
 int _starpu_fifo_push_task(struct _starpu_fifo_taskq *fifo_queue, struct starpu_task *task)

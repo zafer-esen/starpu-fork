@@ -36,6 +36,8 @@ struct _starpu_fifo_taskq
 	double exp_start; /* Expected start date of first task in the queue */
 	double exp_end; /* Expected end date of last task in the queue */
 	double exp_len; /* Expected duration of the set of tasks in the queue */
+	double exp_cachemiss;
+		unsigned resort;
 };
 
 struct _starpu_fifo_taskq*_starpu_create_fifo(void) STARPU_ATTRIBUTE_MALLOC;

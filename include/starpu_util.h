@@ -378,6 +378,7 @@ int starpu_data_cpy(starpu_data_handle_t dst_handle, starpu_data_handle_t src_ha
 
 /* Return the current date in us */
 double starpu_timing_now(void);
+void starpu_clear_dsm_state(void);
 
 #ifdef _WIN32
 /* Try to fetch the system definition of timespec */

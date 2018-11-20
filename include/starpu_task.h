@@ -104,6 +104,8 @@ struct starpu_codelet
 
 struct starpu_task
 {
+		char argo_prefetched;
+		char argo_cached;
 	struct starpu_codelet *cl;
 
 	struct starpu_data_descr buffers[STARPU_NMAXBUFS] STARPU_DEPRECATED;

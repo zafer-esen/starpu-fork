@@ -16,6 +16,7 @@
  * See the GNU Lesser General Public License in COPYING.LGPL for more details.
  */
 
+#include "argo.h"
 #include <starpu.h>
 #include <starpu_profiling.h>
 #include <common/config.h>
@@ -293,6 +294,8 @@ double starpu_data_expected_transfer_time(starpu_data_handle_t handle, unsigned 
 	return starpu_transfer_predict(src_node, memory_node, size);
 }
 
+
+
 /* Data transfer performance modeling */
 double starpu_task_expected_data_transfer_time(unsigned memory_node, struct starpu_task *task)
 {
@@ -301,11 +304,17 @@ double starpu_task_expected_data_transfer_time(unsigned memory_node, struct star
 
 	double penalty = 0.0;
 
+
+	void *local_ptr;
+	size_t data_size;
+
 	for (buffer = 0; buffer < nbuffers; buffer++)
 	{
 		starpu_data_handle_t handle = STARPU_TASK_GET_HANDLE(task, buffer);
 		enum starpu_data_access_mode mode = STARPU_CODELET_GET_MODE(task->cl, buffer);
-
+		local_ptr = starpu_data_get_local_ptr(handle);
+		data_size = starpu_data_get_size(handle);
+		//Potentially want to add argotime here
 		penalty += starpu_data_expected_transfer_time(handle, memory_node, mode);
 	}
 

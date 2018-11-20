@@ -29,6 +29,7 @@
 #include <core/workers.h>
 #include <core/debug.h>
 #include <core/task.h>
+#include <core/sched_policy.h>
 #include <datawizard/malloc.h>
 #include <profiling/profiling.h>
 #include <starpu_task_list.h>
@@ -45,6 +46,13 @@
 #if defined(_WIN32) && !defined(__CYGWIN__)
 #include <windows.h>
 #endif
+
+//#define ARGO 1
+//#ifdef ARGO
+#include "argo.h"
+//#endif
+//#include "../../../argodsm-stage/src/argo.h"
+
 
 /* acquire/release semantic for concurrent initialization/de-initialization */
 static starpu_pthread_mutex_t init_mutex = STARPU_PTHREAD_MUTEX_INITIALIZER;
@@ -708,14 +716,31 @@ int starpu_init(struct starpu_conf *user_conf)
 {
 	unsigned worker;
 	int ret;
+	int ctr=0;
 
 	/* This initializes _starpu_silent, thus needs to be early */
 	_starpu_util_init();
+
 
 #ifdef STARPU_SIMGRID
 	/* This initializes the simgrid thread library, thus needs to be early */
 	_starpu_simgrid_init();
 #endif
+
+	//#ifdef ARGO
+
+	argo_init(100L*1024l*1024l*1024l);//60gb global address space
+	if(argo_number_of_nodes() > 1 && argo_node_id() != 0*(argo_number_of_nodes()-1)){ //We set last node as compute so most/all mem is remote for worst case scenario
+		//if(argo_number_of_nodes() > 1 && argo_node_id() != 0){
+		_STARPU_DISP("argo memnodes stuck here\n");
+		argo_finalize();
+		exit(EXIT_SUCCESS);
+	}
+	else{
+		_STARPU_DISP("INITED ARGO - i am compute node :%d\n", argo_node_id());
+	}
+	//#endif
+
 
 	STARPU_PTHREAD_MUTEX_LOCK(&init_mutex);
 	while (initialized == CHANGING)
@@ -728,6 +753,8 @@ int starpu_init(struct starpu_conf *user_conf)
 		STARPU_PTHREAD_MUTEX_UNLOCK(&init_mutex);
 		return 0;
 	}
+
+
 	/* initialized == UNINITIALIZED */
 	initialized = CHANGING;
 	STARPU_PTHREAD_MUTEX_UNLOCK(&init_mutex);
@@ -798,6 +825,7 @@ int starpu_init(struct starpu_conf *user_conf)
 		AYU_event(AYU_PREINIT, 0, (void*) &ayu_rt);
 	}
 #endif
+
 	/* store the pointer to the user explicit configuration during the
 	 * initialization */
 	if (user_conf == NULL)
@@ -871,11 +899,13 @@ int starpu_init(struct starpu_conf *user_conf)
 	for (worker = 0; worker < config.topology.nworkers; worker++)
 		_starpu_worker_init(&config.workers[worker], &config);
 
+
 	disable_kernels = starpu_get_env_number("STARPU_DISABLE_KERNELS");
 	STARPU_PTHREAD_KEY_CREATE(&worker_key, NULL);
 	keys_initialized = 1;
 
 	struct starpu_sched_policy *selected_policy = _starpu_select_sched_policy(&config, config.conf.sched_policy_name);
+
 	_starpu_create_sched_ctx(selected_policy, NULL, -1, 1, "init", 0, 0, 0, 0);
 
 	_starpu_initialize_registered_performance_models();
@@ -1081,9 +1111,13 @@ void starpu_shutdown(void)
 		return;
 	}
 
+		argo_finalize();
+
+
 	/* We're last */
 	initialized = CHANGING;
 	STARPU_PTHREAD_MUTEX_UNLOCK(&init_mutex);
+	
 
 	/* If the workers are frozen, no progress can be made. */
 	STARPU_ASSERT(config.pause_depth <= 0);
@@ -1158,7 +1192,7 @@ void starpu_shutdown(void)
 #ifdef HAVE_AYUDAME_H
 	if (AYU_event) AYU_event(AYU_FINISH, 0, NULL);
 #endif
-
+_starpu_print_idle_time();
 	_STARPU_DEBUG("Shutdown finished\n");
 }
 

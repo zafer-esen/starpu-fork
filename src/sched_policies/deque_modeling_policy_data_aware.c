@@ -5,7 +5,7 @@
  * Copyright (C) 2011  Télécom-SudParis
  * Copyright (C) 2011-2012  INRIA
  *
- * StarPU is free software; you can redistribute it and/or modify
+ * StarPU is free software; you can rediribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
  * the Free Software Foundation; either version 2.1 of the License, or (at
  * your option) any later version.
@@ -24,6 +24,7 @@
 
 #include <common/fxt.h>
 #include <core/task.h>
+#include <core/sched_ctx.h>
 
 #include <sched_policies/fifo_queues.h>
 #include <limits.h>
@@ -31,6 +32,15 @@
 #ifdef HAVE_AYUDAME_H
 #include <Ayudame.h>
 #endif
+
+#ifndef ARGO_CACHELINE
+//Should be defined to whatever the cacheline is in argo (pages)
+#define ARGO_CACHELINE 128.0
+#endif
+#include "argo.h"
+
+//const double argo_signal_penalty = 0.0008;
+//const double argo_task_penalty = 0.02;
 
 #ifndef DBL_MIN
 #define DBL_MIN __DBL_MIN__
@@ -42,15 +52,15 @@
 
 struct _starpu_dmda_data
 {
-	double alpha;
-	double beta;
-	double _gamma;
-	double idle_power;
+		double alpha;
+		double beta;
+		double _gamma;
+		double idle_power;
 
-	struct _starpu_fifo_taskq **queue_array;
+		struct _starpu_fifo_taskq **queue_array;
 
-	long int total_task_cnt;
-	long int ready_task_cnt;
+		long int total_task_cnt;
+		long int ready_task_cnt;
 };
 
 /* The dmda scheduling policy uses
@@ -152,13 +162,10 @@ static struct starpu_task *_starpu_fifo_pop_first_ready_task(struct _starpu_fifo
 						break;
 				}
 			}
-
 			current = current->next;
 		}
-
 		starpu_task_list_erase(&fifo_queue->taskq, task);
 	}
-
 	return task;
 }
 
@@ -203,8 +210,9 @@ static struct starpu_task *dmda_pop_ready_task(unsigned sched_ctx_id)
 
 static struct starpu_task *dmda_pop_task(unsigned sched_ctx_id)
 {
-	struct _starpu_dmda_data *dt = (struct _starpu_dmda_data*)starpu_sched_ctx_get_policy_data(sched_ctx_id);
+	//Not worth doing anything with Argo here - too soon in time when it needed to be used. 
 
+	struct _starpu_dmda_data *dt = (struct _starpu_dmda_data*)starpu_sched_ctx_get_policy_data(sched_ctx_id);
 	struct starpu_task *task;
 
 	int workerid = starpu_worker_get_id();
@@ -218,10 +226,8 @@ static struct starpu_task *dmda_pop_task(unsigned sched_ctx_id)
 		double transfer_model = task->predicted_transfer;
 		/* We now start the transfer, get rid of it in the completion
 		 * prediction */
-
-		if(!isnan(transfer_model)) 
-		{
-			double model = task->predicted;
+		if(!isnan(transfer_model)){
+			double model = task->predicted+_starpu_get_job_associated_to_task(task)->argo_penalty;
 			fifo->exp_len -= transfer_model;
 			fifo->exp_start = starpu_timing_now() + transfer_model+model;
 			fifo->exp_end = fifo->exp_start + fifo->exp_len;
@@ -281,12 +287,16 @@ static int push_task_on_best_worker(struct starpu_task *task, int best_workerid,
 				    double predicted, double predicted_transfer,
 				    int prio, unsigned sched_ctx_id)
 {
+
+
+	task->argo_cached=0; //Assume not argo cached when we push task on a worker
+
 	struct _starpu_dmda_data *dt = (struct _starpu_dmda_data*)starpu_sched_ctx_get_policy_data(sched_ctx_id);
 	/* make sure someone coule execute that task ! */
 	STARPU_ASSERT(best_workerid != -1);
 
 	struct _starpu_fifo_taskq *fifo = dt->queue_array[best_workerid];
-
+	//	_STARPU_DISP("inb4 sched condition\n");
 	starpu_pthread_mutex_t *sched_mutex;
 	starpu_pthread_cond_t *sched_cond;
 	starpu_worker_get_sched_condition(best_workerid, &sched_mutex, &sched_cond);
@@ -296,8 +306,18 @@ static int push_task_on_best_worker(struct starpu_task *task, int best_workerid,
 #endif //STARPU_USE_SC_HYPERVISOR
 
 	STARPU_PTHREAD_MUTEX_LOCK(sched_mutex);
+	int workerid = starpu_worker_get_id();
+	struct _starpu_fifo_taskq *sched_fifo;
+	
+	float old_start,old_end,old_len,pred_start,pred_end,pred_len,pred_len2;
+	if(workerid != -1){
+		sched_fifo = dt->queue_array[workerid]; 
+		old_start = sched_fifo->exp_start; //Save expected start for comparison later
+	}
+	/* old_end = fifo->exp_end; */
+	/* old_len = fifo->exp_len; */
+	/* Sometimes workers didn't take the tasks as early as we expected */
 
-        /* Sometimes workers didn't take the tasks as early as we expected */
 	fifo->exp_start = STARPU_MAX(fifo->exp_start, starpu_timing_now());
 	fifo->exp_end = fifo->exp_start + fifo->exp_len;
 
@@ -331,18 +351,14 @@ static int push_task_on_best_worker(struct starpu_task *task, int best_workerid,
 	task->predicted = predicted;
 	task->predicted_transfer = predicted_transfer;
 
+
 #ifdef STARPU_USE_TOP
 	starpu_top_task_prevision(task, best_workerid,
 				  (unsigned long long)(fifo->exp_end-predicted)/1000,
 				  (unsigned long long)fifo->exp_end/1000);
 #endif /* !STARPU_USE_TOP */
-
-	if (starpu_get_prefetch_flag())
-	{
-		unsigned memory_node = starpu_worker_get_memory_node(best_workerid);
-		starpu_prefetch_task_input_on_node(task, memory_node);
-	}
-
+	
+	//_STARPU_DISP("inb4 ayudame\n");
 #ifdef HAVE_AYUDAME_H
 	if (AYU_event)
 	{
@@ -350,30 +366,177 @@ static int push_task_on_best_worker(struct starpu_task *task, int best_workerid,
 		AYU_event(AYU_ADDTASKTOQUEUE, _starpu_get_job_associated_to_task(task)->job_id, &id);
 	}
 #endif
+	//_STARPU_DISP("inb4 check prio\n");
 	int ret = 0;
-	if (prio)
-	{
-		STARPU_PTHREAD_MUTEX_LOCK(sched_mutex);
-		ret =_starpu_fifo_push_sorted_task(dt->queue_array[best_workerid], task);
-#ifndef STARPU_NON_BLOCKING_DRIVERS
-		STARPU_PTHREAD_COND_SIGNAL(sched_cond);
-#endif
-		starpu_push_task_end(task);
-		STARPU_PTHREAD_MUTEX_UNLOCK(sched_mutex);
-	}
-	else
-	{
-		STARPU_PTHREAD_MUTEX_LOCK(sched_mutex);
-		starpu_task_list_push_back (&dt->queue_array[best_workerid]->taskq, task);
-		dt->queue_array[best_workerid]->ntasks++;
-		dt->queue_array[best_workerid]->nprocessed++;
-#ifndef STARPU_NON_BLOCKING_DRIVERS
-		STARPU_PTHREAD_COND_SIGNAL(sched_cond);
-#endif
-		starpu_push_task_end(task);
-		STARPU_PTHREAD_MUTEX_UNLOCK(sched_mutex);
+	
+
+	STARPU_PTHREAD_MUTEX_LOCK(sched_mutex);
+	unsigned nbuffers = task->cl->nbuffers;
+	char* iscached = (char*)malloc(nbuffers);
+	unsigned index;
+
+	//If there is a prefetch, and how many
+	char dopref = 0;
+	//Value representing which buffers are not cached
+	char cntpref = 0;
+
+	//Loop through buffers to see which are cached in the argo system
+	for (index = 0; index < nbuffers; index++){
+
+		starpu_data_handle_t handle = STARPU_TASK_GET_HANDLE(task, index);
+		enum starpu_data_access_mode mode = STARPU_CODELET_GET_MODE(task->cl, index);
+		void *local_ptr;
+		size_t data_size;
+		local_ptr = starpu_data_get_local_ptr(handle);
+		data_size = starpu_data_get_size(handle);
+		int tmp = argo_in_cache(local_ptr,data_size);
+		iscached[index]=tmp;
+		if(tmp==0){ // Not cached
+			//Increase by different numbers to be able to see later which buffer is not cached... Can be done with a different structure but this works for now
+			//Buffer0 = 1, buffer1=2, buffer2=4 (powerof2)
+			if(index==0){
+				cntpref+=1; 
+			} 
+			if(index==1){
+				cntpref+=2;
+			} 
+			if(index==2){
+				cntpref+=4;
+			} 
+			dopref++;
+		}
 	}
 
+	int taskprio = dopref;
+	if(cntpref!=nbuffers){
+		taskprio+=42-dopref; //Priority based on how much is cached, less cached, less priority
+	}
+
+	task->argo_cached=cntpref;
+	task->priority = taskprio;
+
+	//Different schedules with argo knowledge
+	const int back = 0;//Put back of the queue
+	const int front_all_cached = 1; //Check if all buffers are cached, if so, push in front of the workers workq
+	const int front_some_cached = 2;//Check if some buffers are cached, if so, push in front of the workers workq
+	const int sorted=3; //Sort based on how cached tasks are
+			
+			
+	int pushpolicy=argo_get_sched_policy();
+
+	if(pushpolicy == front_all_cached){ //Check if all buffers are cached, if so, push in front of the workers workq
+		if(fifo && (fifo->ntasks==0 || dopref==0)){
+			starpu_task_list_push_front(&dt->queue_array[best_workerid]->taskq, task);
+			ret=0;
+			task->priority = 1;
+		}
+		else{
+			starpu_task_list_push_back(&dt->queue_array[best_workerid]->taskq, task);
+			ret=fifo->ntasks -1;
+			task->priority = 0;
+		}
+	}
+	else if(pushpolicy == front_some_cached){//Check if some buffers are cached, if so, push in front of the workers workq
+		if(fifo && (fifo->ntasks==0 || dopref!=nbuffers)){
+			starpu_task_list_push_front(&dt->queue_array[best_workerid]->taskq, task);
+			ret=0;
+			task->priority = 1;
+		}
+		else{
+			starpu_task_list_push_back(&dt->queue_array[best_workerid]->taskq, task);
+			ret=fifo->ntasks -1;
+			task->priority = 0;
+		}
+	}
+	else if(pushpolicy==back){//Put back of the queue
+		starpu_task_list_push_back(&dt->queue_array[best_workerid]->taskq, task);
+	}
+	else if(pushpolicy==sorted){//Sort based on how cached tasks are
+		ret =_starpu_fifo_push_sorted_task(dt->queue_array[best_workerid], task);
+	}
+	task->argo_prefetched=0;
+
+
+	float ratio, ratioend;
+	if(pushpolicy==back){
+		ratio=1;
+		ratioend=1;
+	} 
+	else if(fifo->ntasks > 0 && ret <= fifo->ntasks){
+		ratio = ((float)ret)/((float)fifo->ntasks);
+	}
+	else{
+		ratio = 0;
+		ratioend = 0;
+	}
+
+	//Predicted times for start, end, length
+	pred_start = fifo->exp_start + ratio*fifo->exp_len;
+	pred_end = fifo->exp_start + ratioend*fifo->exp_len;
+	pred_len = ratio*fifo->exp_len;
+
+	if(dopref>0){ //Some prefetching needed
+
+		unsigned int workers = starpu_worker_get_count();
+		float time_until_cachemiss = 0.0;
+		int i;
+		float lowest_miss = 0;
+
+		if(fifo->exp_cachemiss > pred_start){
+			fifo->exp_cachemiss=pred_start;//If we expect task scheduled earlier, cachemiss will be expected around when this task is scheduled as its not fully cached or local
+		}
+
+		for(i = 0; i < workers; i++){ //Iterate through the fifo to find soonest expected cachemiss
+			struct _starpu_fifo_taskq *current_fifo = dt->queue_array[i];
+			if(i==0 || lowest_miss > current_fifo->exp_cachemiss){
+				lowest_miss = current_fifo->exp_cachemiss;
+			}
+		}
+
+		if(fifo->exp_cachemiss > lowest_miss){
+			//Update fifos expected cachemiss to the lowest one so we can always schedule for worst case (IDEA:Missing over the network is much worse than a potential bad schedule)
+			fifo->exp_cachemiss=lowest_miss;
+		}
+			
+	}			
+	else{ //Everything cached
+		if(fifo->exp_cachemiss < pred_end){ //at least cachemisses must be after this task if its cached
+			fifo->exp_cachemiss = pred_end;
+		}
+	}
+	//	printf("tsttasks%d exp qtime:%lf fifotime:%lf,qsize:%d\n",dt->queue_array[best_workerid]->ntasks,qsize*argo_get_taskavg()*1000000, (fifo->exp_len),qsize);
+
+	dt->queue_array[best_workerid]->ntasks++;
+	dt->queue_array[best_workerid]->nprocessed++;
+
+#ifndef STARPU_NON_BLOCKING_DRIVERS
+	STARPU_PTHREAD_COND_SIGNAL(sched_cond);
+#endif
+	//			_STARPU_DISP("work id:%d\n",starpu_worker_get_id());
+	float penalty = 0;
+
+	if(workerid != -1){ //add eventual timing diff it takes to do this calculations
+		float diff = starpu_timing_now()-old_start;
+		sched_fifo->exp_start+=diff;
+		sched_fifo->exp_end+=diff;
+	}
+
+	starpu_data_handle_t handle = STARPU_TASK_GET_HANDLE(task, 0);
+	float tmp_data_size = (float)starpu_data_get_size(handle);
+	penalty = 1000000*(dopref)*argo_get_signalavg()*((tmp_data_size)/(4096.0*ARGO_CACHELINE)); //Or just poll argo what the cacheline size is
+	_starpu_get_job_associated_to_task(task)->argo_penalty=penalty;
+
+	fifo->exp_end += penalty;
+	fifo->exp_len += penalty;
+
+
+	//printf("now:%lf fifo start:%lf end:%lf len:%lf readytask:%d totaltask:%d\n",starpu_timing_now(),fifo->exp_start,fifo->exp_end,fifo->exp_len,starpu_sched_ctx_get_nready_tasks(0),_starpu_get_nsubmitted_tasks_of_sched_ctx(0));				
+	starpu_push_task_end(task);
+
+
+	STARPU_PTHREAD_MUTEX_UNLOCK(sched_mutex);
+	free(iscached);		
+	
 	return ret;
 }
 
@@ -518,8 +681,7 @@ static void compute_all_performance_predictions(struct starpu_task *task,
 						double *best_exp_endp,
 						double local_data_penalty[nworkers][STARPU_MAXIMPLEMENTATIONS],
 						double local_power[nworkers][STARPU_MAXIMPLEMENTATIONS],
-						int *forced_worker, int *forced_impl, unsigned sched_ctx_id)
-{
+						int *forced_worker, int *forced_impl, unsigned sched_ctx_id){
 	int calibrating = 0;
 	double max_exp_end = DBL_MIN;
 	double best_exp_end = DBL_MAX;
@@ -557,7 +719,7 @@ static void compute_all_performance_predictions(struct starpu_task *task,
 		double exp_start = STARPU_MAX(fifo->exp_start, starpu_timing_now());
 
 		for(nimpl  = 0; nimpl < STARPU_MAXIMPLEMENTATIONS; nimpl++)
-	 	{
+		{
 			if (!starpu_worker_can_execute_task(worker, task, nimpl))
 			{
 				/* no one on that queue may execute this task */
@@ -631,7 +793,7 @@ static void compute_all_performance_predictions(struct starpu_task *task,
 				calibrating = 1;
 
 			if (isnan(local_task_length[worker_ctx][nimpl])
-					|| _STARPU_IS_ZERO(local_task_length[worker_ctx][nimpl]))
+			    || _STARPU_IS_ZERO(local_task_length[worker_ctx][nimpl]))
 				/* there is no prediction available for that task
 				 * with that arch (yet or at all), so switch to a greedy strategy */
 				unknown = 1;
@@ -639,7 +801,32 @@ static void compute_all_performance_predictions(struct starpu_task *task,
 			if (unknown)
 				continue;
 
-			exp_end[worker_ctx][nimpl] = exp_start + fifo->exp_len + local_task_length[worker_ctx][nimpl];
+			unsigned nbuffers = task->cl->nbuffers;
+			unsigned index;
+
+			char dopref = 0;
+			for (index = 0; index < nbuffers; index++){
+				starpu_data_handle_t handle = STARPU_TASK_GET_HANDLE(task, index);
+				enum starpu_data_access_mode mode = STARPU_CODELET_GET_MODE(task->cl, index);
+				void *local_ptr;
+				size_t data_size;
+				local_ptr = starpu_data_get_local_ptr(handle);
+				data_size = starpu_data_get_size(handle);
+
+				char tmpcached  = argo_in_cache(local_ptr,data_size);
+				if(tmpcached == 0){
+					dopref++;
+				}
+			}
+			float penalty = 0;
+
+			if(dopref!=0){
+				starpu_data_handle_t handle = STARPU_TASK_GET_HANDLE(task, 0);
+				float tmp_data_size = (float)starpu_data_get_size(handle);
+				penalty = 1000000*cntpref*argo_get_signalavg()*((tmp_data_size)/(ARGO_CACHELINE*4096.0)); //Worst case scenario if no prefetch
+			}
+					
+			exp_end[worker_ctx][nimpl] = exp_start + fifo->exp_len + local_task_length[worker_ctx][nimpl]+penalty;
 
 			if (exp_end[worker_ctx][nimpl] < best_exp_end)
 			{
@@ -664,6 +851,7 @@ static void compute_all_performance_predictions(struct starpu_task *task,
 
 static int _dmda_push_task(struct starpu_task *task, unsigned prio, unsigned sched_ctx_id)
 {
+	prio = 0;
 	/* find the queue */
 	unsigned worker, worker_ctx = 0;
 	int best = -1, best_in_ctx = -1;
@@ -908,11 +1096,52 @@ static void deinitialize_dmda_policy(unsigned sched_ctx_id)
  * value of the expected start, end, length, etc... */
 static void dmda_pre_exec_hook(struct starpu_task *task)
 {
+
+	//	char prefetched = _starpu_get_job_associated_to_task(task)->argo_prefetched;
+	char prefetched=0;
+	if(prefetched==1){
+
+		if(task){
+			unsigned nbuffers = task->cl->nbuffers;
+
+			unsigned index;
+
+			for (index = 0; index < nbuffers; index++)
+			{
+				starpu_data_handle_t handle = STARPU_TASK_GET_HANDLE(task, index);
+				//				printf("task:%p, prefetch :%d/%dbuffers workerid:%d footprint:%ld getsize:%d\n",task,index,nbuffers,starpu_worker_get_id(),_starpu_data_get_footprint(handle), _starpu_data_get_size(handle));
+				enum starpu_data_access_mode mode = STARPU_CODELET_GET_MODE(task->cl, index);
+
+				//				if (mode & (STARPU_SCRATCH|STARPU_REDUX))
+				//continue;
+				if(mode & (STARPU_R|STARPU_W)){
+					void *local_ptr;
+					size_t data_size;
+					local_ptr = starpu_data_get_local_ptr(handle);
+					data_size = starpu_data_get_size(handle);
+					char mode = 0;
+					if(mode & (STARPU_W)){mode = 1;}
+
+				}
+				else{
+					if(mode & STARPU_REDUX){
+						printf("mode redux:%d\n",mode);
+					}
+					else if(mode & STARPU_SCRATCH){
+						printf("mode scratch:%d\n",mode);
+					}
+					else{
+						printf("mode other:%d\n",mode);
+					}
+				}
+			}
+		}
+	}
 	unsigned sched_ctx_id = task->sched_ctx;
 	int workerid = starpu_worker_get_id();
 	struct _starpu_dmda_data *dt = (struct _starpu_dmda_data*)starpu_sched_ctx_get_policy_data(sched_ctx_id);
 	struct _starpu_fifo_taskq *fifo = dt->queue_array[workerid];
-	double model = task->predicted;
+	double model = task->predicted+_starpu_get_job_associated_to_task(task)->argo_penalty;
 
 	starpu_pthread_mutex_t *sched_mutex;
 	starpu_pthread_cond_t *sched_cond;
@@ -988,20 +1217,30 @@ static void dmda_push_task_notify(struct starpu_task *task, int workerid, int pe
 	STARPU_PTHREAD_MUTEX_UNLOCK(sched_mutex);
 }
 
+
+pthread_t starpu_prefetchthread;
+
+
+
 static void dmda_post_exec_hook(struct starpu_task * task)
 {
 
 	struct _starpu_dmda_data *dt = (struct _starpu_dmda_data*)starpu_sched_ctx_get_policy_data(task->sched_ctx);
+	//	printf("sched ctx:%d\n",task->sched_ctx);
 	int workerid = starpu_worker_get_id();
 	struct _starpu_fifo_taskq *fifo = dt->queue_array[workerid];
 	starpu_pthread_mutex_t *sched_mutex;
 	starpu_pthread_cond_t *sched_cond;
 	starpu_worker_get_sched_condition(workerid, &sched_mutex, &sched_cond);
 	STARPU_PTHREAD_MUTEX_LOCK(sched_mutex);
+
+
 	if(task->execute_on_a_specific_worker)
 		fifo->ntasks--;
+
 	fifo->exp_start = starpu_timing_now();
 	fifo->exp_end = fifo->exp_start + fifo->exp_len;
+
 	STARPU_PTHREAD_MUTEX_UNLOCK(sched_mutex);
 }
 

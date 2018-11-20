@@ -49,15 +49,15 @@ struct _starpu_job *_starpu_get_job_associated_to_task(struct starpu_task *task)
 int _starpu_task_submit_internally(struct starpu_task *task);
 
 int _starpu_handle_needs_conversion_task(starpu_data_handle_t handle,
-					 unsigned int node);
+																				 unsigned int node);
 int
 _starpu_handle_needs_conversion_task_for_arch(starpu_data_handle_t handle,
-				     enum starpu_node_kind node_kind);
+																							enum starpu_node_kind node_kind);
 
 int _starpu_task_uses_multiformat_handles(struct starpu_task *task);
 
 int _starpu_task_submit_conversion_task(struct starpu_task *task,
-					unsigned int workerid);
+																				unsigned int workerid);
 
 void _starpu_task_check_deprecated_fields(struct starpu_task *task);
 void _starpu_codelet_check_deprecated_fields(struct starpu_codelet *cl);
