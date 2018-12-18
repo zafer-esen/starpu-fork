@@ -16,7 +16,7 @@
  * See the GNU Lesser General Public License in COPYING.LGPL for more details.
  */
 
-#include "argo.h"
+//#include "../../../argodsm-stage/src/argo.h"
 #include <starpu.h>
 #include <starpu_profiling.h>
 #include <common/config.h>
@@ -314,7 +314,6 @@ double starpu_task_expected_data_transfer_time(unsigned memory_node, struct star
 		enum starpu_data_access_mode mode = STARPU_CODELET_GET_MODE(task->cl, buffer);
 		local_ptr = starpu_data_get_local_ptr(handle);
 		data_size = starpu_data_get_size(handle);
-		//Potentially want to add argotime here
 		penalty += starpu_data_expected_transfer_time(handle, memory_node, mode);
 	}
 

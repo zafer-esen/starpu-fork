@@ -24,10 +24,13 @@
 #include <datawizard/memory_manager.h>
 #include <datawizard/memory_nodes.h>
 
-
-/* Get argo allocators */
+/* #define ARGO 1 */
+/* #ifdef ARGO */
 #include "allocators/allocators.h"
+//#include "allocators/allocators.h"
+//#include "argo.h"
 #include "argo.h"
+/* #endif */
 
 static size_t _malloc_align = sizeof(void*);
 static int disable_pinning;
@@ -48,6 +51,16 @@ struct malloc_pinned_codelet_struct
 #endif
 
 /* Would be difficult to do it this way, we need to remember the cl_mem to be able to free it later... */
+
+//#ifdef STARPU_USE_OPENCL
+//static void malloc_pinned_opencl_codelet(void *buffers[] STARPU_ATTRIBUTE_UNUSED, void *arg)
+//{
+//	struct malloc_pinned_codelet_struct *s = arg;
+//        //        *(s->ptr) = malloc(s->dim);
+//        starpu_opencl_allocate_memory(devid, (void **)(s->ptr), s->dim, CL_MEM_READ_WRITE|CL_MEM_ALLOC_HOST_PTR);
+//}
+//#endif
+
 #if defined(STARPU_USE_CUDA) && !defined(HAVE_CUDA_MEMCPY_PEER) && !defined(STARPU_SIMGRID)
 static void malloc_pinned_cuda_codelet(void *buffers[] STARPU_ATTRIBUTE_UNUSED, void *arg)
 {
@@ -70,26 +83,166 @@ static struct starpu_perfmodel malloc_pinned_model =
 static struct starpu_codelet malloc_pinned_cl =
 {
 	.cuda_funcs = {malloc_pinned_cuda_codelet},
+//#ifdef STARPU_USE_OPENCL
+//	.opencl_funcs = {malloc_pinned_opencl_codelet},
+//#endif
 	.nbuffers = 0,
 	.model = &malloc_pinned_model
 };
 #endif
 
-//Argo modified
 int starpu_malloc_flags(void **A, size_t dim, int flags)
 {
 	int ret=0;
 	STARPU_ASSERT(A);
-
-#ifdef ARGO_DEBUG
+	//#ifdef ARGO
 	_STARPU_DISP("starpumallocflags alloc mem ptr:%p, size:%ld node%d/%d\n",*A,dim,argo_node_id(),argo_number_of_nodes());
-#endif
-	*A = dynamic_alloc(dim,8); //8byte alignment might be ok (Unclear what is good here)
-#ifdef ARGO_DEBUG
+	*A = collective_alloc(dim);
+	//*A = dynamic_alloc(dim,8);
 	_STARPU_DISP("starpumallocflags2 alloc mem ptr:%p, size:%ld node%d/%d\n",*A,dim,argo_node_id(),argo_number_of_nodes());
-#endif
+	//*A = dynamic_alloc(dim); 
+
 	if (!*A)
 		ret = -ENOMEM;
+
+	//	_STARPU_DISP("2alloc mem ptr:%p, size:%ld node%d/%d\n",*A,dim,argo_node_id(),argo_number_of_nodes());
+	return ret;
+	//#endif
+	_STARPU_DISP("3alloc mem ptr:%p, size:%ld node%d/%d\n",*A,dim,argo_node_id(),argo_number_of_nodes());
+	if (flags & STARPU_MALLOC_COUNT)
+	{
+		while (_starpu_memory_manager_can_allocate_size(dim, 0) == 0)
+		{
+			size_t freed;
+			size_t reclaim = 2 * dim;
+			_STARPU_DEBUG("There is not enough memory left, we are going to reclaim %ld\n", reclaim);
+			_STARPU_TRACE_START_MEMRECLAIM(0);
+			freed = _starpu_memory_reclaim_generic(0, 0, reclaim);
+			_STARPU_TRACE_END_MEMRECLAIM(0);
+			if (freed < dim)
+			{
+				// We could not reclaim enough memory
+				*A = NULL;
+				return -ENOMEM;
+			}
+		}
+	}
+
+	struct _starpu_machine_config *config = (struct _starpu_machine_config *)_starpu_get_machine_config();
+	if (flags & STARPU_MALLOC_PINNED && disable_pinning <= 0 && STARPU_RUNNING_ON_VALGRIND == 0 && config->conf.ncuda != 0)
+	{
+#ifdef STARPU_SIMGRID
+		/* FIXME: CUDA seems to be taking 650µs every 1MiB.
+		 * Ideally we would simulate this batching in 1MiB requests
+		 * instead of computing an average value.
+		 */
+		MSG_process_sleep((float) dim * 0.000650 / 1048576.);
+#else /* STARPU_SIMGRID */
+		if (_starpu_can_submit_cuda_task())
+		{
+#ifdef STARPU_USE_CUDA
+#ifdef HAVE_CUDA_MEMCPY_PEER
+			cudaError_t cures;
+			cures = cudaHostAlloc(A, dim, cudaHostAllocPortable);
+			if (STARPU_UNLIKELY(cures))
+			{
+				STARPU_CUDA_REPORT_ERROR(cures);
+				ret = -ENOMEM;
+			}
+			goto end;
+#else
+			int push_res;
+
+			STARPU_ASSERT_MSG(_starpu_worker_may_perform_blocking_calls(), "without CUDA peer allocation support, pinned allocation must not be done from task or callback");
+
+			struct malloc_pinned_codelet_struct s =
+			{
+				.ptr = A,
+				.dim = dim
+			};
+
+			malloc_pinned_cl.where = STARPU_CUDA;
+			struct starpu_task *task = starpu_task_create();
+			task->callback_func = NULL;
+			task->cl = &malloc_pinned_cl;
+			task->cl_arg = &s;
+
+			task->synchronous = 1;
+
+			_starpu_exclude_task_from_dag(task);
+
+			push_res = _starpu_task_submit_internally(task);
+			STARPU_ASSERT(push_res != -ENODEV);
+			goto end;
+#endif /* HAVE_CUDA_MEMCPY_PEER */
+#endif /* STARPU_USE_CUDA */
+		}
+//		else if (_starpu_can_submit_opencl_task())
+//		{
+//#ifdef STARPU_USE_OPENCL
+//			int push_res;
+//
+//			STARPU_ASSERT_MSG(_starpu_worker_may_perform_blocking_calls(), "pinned OpenCL allocation must not be done from task or callback");
+//
+//			struct malloc_pinned_codelet_struct s =
+//				{
+//					.ptr = A,
+//					.dim = dim
+//				};
+//
+//			malloc_pinned_cl.where = STARPU_OPENCL;
+//			struct starpu_task *task = starpu_task_create();
+//			task->callback_func = NULL;
+//			task->cl = &malloc_pinned_cl;
+//			task->cl_arg = &s;
+//			task->synchronous = 1;
+//
+//			_starpu_exclude_task_from_dag(task);
+//
+//			push_res = _starpu_task_submit_internally(task);
+//			STARPU_ASSERT(push_res != -ENODEV);
+//			goto end;
+//#endif /* STARPU_USE_OPENCL */
+//		}
+#endif /* STARPU_SIMGRID */
+	}
+
+#ifdef STARPU_HAVE_POSIX_MEMALIGN
+	if (_malloc_align != sizeof(void*))
+	{
+		if (posix_memalign(A, _malloc_align, dim))
+		{
+			ret = -ENOMEM;
+			*A = NULL;
+		}
+	}
+	else
+#elif defined(STARPU_HAVE_MEMALIGN)
+		if (_malloc_align != sizeof(void*))
+		{
+			*A = memalign(_malloc_align, dim);
+			if (!*A)
+				ret = -ENOMEM;
+		}
+		else
+#endif /* STARPU_HAVE_POSIX_MEMALIGN */
+		{
+			*A = malloc(dim);
+			if (!*A)
+				ret = -ENOMEM;
+		}
+
+#if !defined(STARPU_SIMGRID) && defined(STARPU_USE_CUDA)
+end:
+#endif
+	if (ret == 0)
+	{
+		STARPU_ASSERT(*A);
+	}
+	else if (flags & STARPU_MALLOC_COUNT)
+	{
+		_starpu_memory_manager_deallocate_size(dim, 0);
+	}
 
 	return ret;
 }
@@ -109,6 +262,14 @@ static void free_pinned_cuda_codelet(void *buffers[] STARPU_ATTRIBUTE_UNUSED, vo
 }
 #endif
 
+//#ifdef STARPU_USE_OPENCL
+//static void free_pinned_opencl_codelet(void *buffers[] STARPU_ATTRIBUTE_UNUSED, void *arg)
+//{
+//        //        free(arg);
+//        int err = clReleaseMemObject(arg);
+//        if (err != CL_SUCCESS) STARPU_OPENCL_REPORT_ERROR(err);
+//}
+//#endif
 
 #if defined(STARPU_USE_CUDA) && !defined(HAVE_CUDA_MEMCPY_PEER) && !defined(STARPU_SIMGRID) // || defined(STARPU_USE_OPENCL)
 static struct starpu_perfmodel free_pinned_model =
@@ -120,17 +281,98 @@ static struct starpu_perfmodel free_pinned_model =
 static struct starpu_codelet free_pinned_cl =
 {
 	.cuda_funcs = {free_pinned_cuda_codelet},
+//#ifdef STARPU_USE_OPENCL
+//	.opencl_funcs = {free_pinned_opencl_codelet},
+//#endif
 	.nbuffers = 0,
 	.model = &free_pinned_model
 };
 #endif
 
-//Argo modified
 int starpu_free_flags(void *A, size_t dim, int flags)
 {
-	//Very simplified - we just use the argo memory
-	dynamic_free(A); //Errors will be catched in argos dynamic_free
-	return 0; //Starpu free flags also always returned 0
+	//#ifdef ARGO
+	//dynamic_free(A);
+		collective_free(A);
+	return 0;
+	//#endif
+
+#ifndef STARPU_SIMGRID
+	if (flags & STARPU_MALLOC_PINNED && disable_pinning <= 0 && STARPU_RUNNING_ON_VALGRIND == 0)
+	{
+		if (_starpu_can_submit_cuda_task())
+		{
+#ifdef STARPU_USE_CUDA
+#ifndef HAVE_CUDA_MEMCPY_PEER
+			if (!_starpu_is_initialized())
+			{
+#endif
+				/* This is especially useful when starpu_free is called from
+				 * the GCC-plugin. starpu_shutdown will probably have already
+				 * been called, so we will not be able to submit a task. */
+				cudaError_t err = cudaFreeHost(A);
+				if (STARPU_UNLIKELY(err))
+					STARPU_CUDA_REPORT_ERROR(err);
+				goto out;
+#ifndef HAVE_CUDA_MEMCPY_PEER
+			}
+			else
+			{
+				int push_res;
+
+				STARPU_ASSERT_MSG(_starpu_worker_may_perform_blocking_calls(), "without CUDA peer allocation support, pinned deallocation must not be done from task or callback");
+
+				free_pinned_cl.where = STARPU_CUDA;
+				struct starpu_task *task = starpu_task_create();
+				task->callback_func = NULL;
+				task->cl = &free_pinned_cl;
+				task->cl_arg = A;
+				task->synchronous = 1;
+
+				_starpu_exclude_task_from_dag(task);
+
+				push_res = _starpu_task_submit_internally(task);
+				STARPU_ASSERT(push_res != -ENODEV);
+				goto out;
+			}
+#endif /* HAVE_CUDA_MEMCPY_PEER */
+#endif /* STARPU_USE_CUDA */
+		}
+//	else if (_starpu_can_submit_opencl_task())
+//	{
+//#ifdef STARPU_USE_OPENCL
+//		int push_res;
+//
+//		STARPU_ASSERT_MSG(_starpu_worker_may_perform_blocking_calls(), "pinned OpenCL deallocation must not be done from task or callback");
+//
+//                free_pinned_cl.where = STARPU_OPENCL;
+//		struct starpu_task *task = starpu_task_create();
+//		task->callback_func = NULL;
+//		task->cl = &free_pinned_cl;
+//		task->cl_arg = A;
+//		task->synchronous = 1;
+//
+//		_starpu_exclude_task_from_dag(task);
+//
+//		push_res = starpu_task_submit(task);
+//		STARPU_ASSERT(push_res != -ENODEV);
+//		goto out;
+//	}
+//#endif
+	}
+#endif /* STARPU_SIMGRID */
+
+	free(A);
+
+#if !defined(STARPU_SIMGRID) && defined(STARPU_USE_CUDA)
+out:
+#endif
+	if (flags & STARPU_MALLOC_COUNT)
+	{
+		_starpu_memory_manager_deallocate_size(dim, 0);
+	}
+
+	return 0;
 }
 
 int starpu_free(void *A)
@@ -143,20 +385,186 @@ static starpu_pthread_mutex_t cuda_alloc_mutex = STARPU_PTHREAD_MUTEX_INITIALIZE
 static starpu_pthread_mutex_t opencl_alloc_mutex = STARPU_PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-//Argo modified
 static uintptr_t
 _starpu_malloc_on_node(unsigned dst_node, size_t size)
 {
 	uintptr_t addr = 0;
-	addr = dynamic_alloc(size,8); //May want to play around with the alignment. Perhaps align to a task granularity can be worth it?
+	//#ifdef ARGO
+	//addr = dynamic_alloc(size,8);
+	addr = collective_alloc(size);
+	//addr = dynamic_alloc(size);
+	_STARPU_DISP("ALLOC MEM ptr:%p size:%ld node%d/%d\n",addr,size,argo_node_id(),argo_number_of_nodes());
+	return addr;
+	//#endif
+
+#ifdef STARPU_USE_CUDA
+	cudaError_t status;
+#endif
+
+	if (_starpu_memory_manager_can_allocate_size(size, dst_node) == 0)
+		return 0;
+
+	switch(starpu_node_get_kind(dst_node))
+	{
+		case STARPU_CPU_RAM:
+		{
+			addr = (uintptr_t)malloc(size);
+			break;
+		}
+#if defined(STARPU_USE_CUDA) || defined(STARPU_SIMGRID)
+		case STARPU_CUDA_RAM:
+		{
+#ifdef STARPU_SIMGRID
+			static uintptr_t last[STARPU_MAXNODES];
+#ifdef STARPU_DEVEL
+#warning TODO: record used memory, using a simgrid property to know the available memory
+#endif
+			/* Sleep for the allocation */
+			STARPU_PTHREAD_MUTEX_LOCK(&cuda_alloc_mutex);
+			MSG_process_sleep(0.000175);
+			if (!last[dst_node])
+				last[dst_node] = 1<<10;
+			addr = last[dst_node];
+			last[dst_node]+=size;
+			STARPU_ASSERT(last[dst_node] >= addr);
+			STARPU_PTHREAD_MUTEX_UNLOCK(&cuda_alloc_mutex);
+#else
+			struct _starpu_worker *worker = _starpu_get_local_worker_key();
+			unsigned devid = _starpu_memory_node_get_devid(dst_node);
+			if (!worker || worker->arch != STARPU_CUDA_WORKER || worker->devid != devid)
+#if defined(HAVE_CUDA_MEMCPY_PEER)
+				starpu_cuda_set_device(devid);
+#else
+				STARPU_ASSERT_MSG(0, "CUDA peer access is not available with this version of CUDA");
+#endif
+			status = cudaMalloc((void **)&addr, size);
+			if (!addr || (status != cudaSuccess))
+			{
+				if (STARPU_UNLIKELY(status != cudaErrorMemoryAllocation))
+					STARPU_CUDA_REPORT_ERROR(status);
+				addr = 0;
+			}
+#endif
+			break;
+		}
+#endif
+#if defined(STARPU_USE_OPENCL) || defined(STARPU_SIMGRID)
+	        case STARPU_OPENCL_RAM:
+		{
+#ifdef STARPU_SIMGRID
+				static uintptr_t last[STARPU_MAXNODES];
+				/* Sleep for the allocation */
+				STARPU_PTHREAD_MUTEX_LOCK(&opencl_alloc_mutex);
+				MSG_process_sleep(0.000175);
+				if (!last[dst_node])
+					last[dst_node] = 1<<10;
+				addr = last[dst_node];
+				last[dst_node]+=size;
+				STARPU_ASSERT(last[dst_node] >= addr);
+				STARPU_PTHREAD_MUTEX_UNLOCK(&opencl_alloc_mutex);
+#else
+                                int ret;
+				cl_mem ptr;
+
+				ret = starpu_opencl_allocate_memory(_starpu_memory_node_get_devid(dst_node), &ptr, size, CL_MEM_READ_WRITE);
+				if (ret)
+				{
+					addr = 0;
+				}
+				else
+				{
+					addr = (uintptr_t)ptr;
+				}
+				break;
+#endif
+		}
+#endif
+		default:
+			STARPU_ABORT();
+	}
+
+	if (addr == 0)
+	{
+		// Allocation failed, gives the memory back to the memory manager
+		_starpu_memory_manager_deallocate_size(size, dst_node);
+	}
 	return addr;
 }
 
-//Argo modified
 void
 _starpu_free_on_node(unsigned dst_node, uintptr_t addr, size_t size)
 {
-	dynamic_free(addr);
+	//#ifdef ARGO
+	//dynamic_free(addr);
+		collective_free(addr);
+	return 0;
+	//#endif
+
+	enum starpu_node_kind kind = starpu_node_get_kind(dst_node);
+	switch(kind)
+	{
+		case STARPU_CPU_RAM:
+			free((void*)addr);
+			break;
+#if defined(STARPU_USE_CUDA) || defined(STARPU_SIMGRID)
+		case STARPU_CUDA_RAM:
+		{
+#ifdef STARPU_SIMGRID
+			STARPU_PTHREAD_MUTEX_LOCK(&cuda_alloc_mutex);
+			/* Sleep for the free */
+			MSG_process_sleep(0.000750);
+			STARPU_PTHREAD_MUTEX_UNLOCK(&cuda_alloc_mutex);
+#else
+			cudaError_t err;
+			struct _starpu_worker *worker = _starpu_get_local_worker_key();
+			unsigned devid = _starpu_memory_node_get_devid(dst_node);
+			if (!worker || worker->arch != STARPU_CUDA_WORKER || worker->devid != devid)
+#if defined(HAVE_CUDA_MEMCPY_PEER)
+				starpu_cuda_set_device(devid);
+#else
+				STARPU_ASSERT_MSG(0, "CUDA peer access is not available with this version of CUDA");
+#endif
+			err = cudaFree((void*)addr);
+			if (STARPU_UNLIKELY(err != cudaSuccess))
+				STARPU_CUDA_REPORT_ERROR(err);
+#endif
+			break;
+		}
+#endif
+#if defined(STARPU_USE_OPENCL) || defined(STARPU_SIMGRID)
+                case STARPU_OPENCL_RAM:
+		{
+#ifdef STARPU_SIMGRID
+			STARPU_PTHREAD_MUTEX_LOCK(&opencl_alloc_mutex);
+			/* Sleep for the free */
+			MSG_process_sleep(0.000750);
+			STARPU_PTHREAD_MUTEX_UNLOCK(&opencl_alloc_mutex);
+#else
+			cl_int err;
+                        err = clReleaseMemObject((void*)addr);
+			if (STARPU_UNLIKELY(err != CL_SUCCESS))
+				STARPU_OPENCL_REPORT_ERROR(err);
+#endif
+                        break;
+		}
+#endif
+		default:
+			STARPU_ABORT();
+	}
+	_starpu_memory_manager_deallocate_size(size, dst_node);
+
+}
+
+int
+starpu_memory_pin(void *addr STARPU_ATTRIBUTE_UNUSED, size_t size STARPU_ATTRIBUTE_UNUSED)
+{
+	if (STARPU_MALLOC_PINNED && disable_pinning <= 0 && STARPU_RUNNING_ON_VALGRIND == 0)
+	{
+#if defined(STARPU_USE_CUDA) && defined(HAVE_CUDA_MEMCPY_PEER)
+		if (cudaHostRegister(addr, size, cudaHostRegisterPortable) != cudaSuccess)
+			return -1;
+#endif
+	}
 	return 0;
 }
 
@@ -280,19 +688,209 @@ static struct _starpu_chunk *_starpu_new_chunk(unsigned dst_node)
 	return chunk;
 }
 
-//Argo modified
 uintptr_t
 starpu_malloc_on_node(unsigned dst_node, size_t size)
 {
-	uintptr_t argoaddr = dynamic_alloc(size,8);
-	//	_STARPU_DISP("ALLOC MEM ptr:%p  size:%d node%d/%d\n",argoaddr,size,argo_node_id(),argo_number_of_nodes());
+
+
+
+	//#ifdef ARGO
+	//uintptr_t argoaddr = dynamic_alloc(size,8);
+	uintptr_t argoaddr = collective_alloc(size);
+
+	//uintptr_t argoaddr = dynamic_alloc(size); 
+	_STARPU_DISP("ALLOC MEM ptr:%p  size:%d node%d/%d\n",argoaddr,size,argo_node_id(),argo_number_of_nodes());
 	return argoaddr;
+	//#endif
+
+
+	/* Big allocation, allocate normally */
+	if (size > CHUNK_ALLOC_MAX || starpu_node_get_kind(dst_node) != STARPU_CUDA_RAM)
+		return _starpu_malloc_on_node(dst_node, size);
+
+	/* Round up allocation to block size */
+	int nblocks = (size + CHUNK_ALLOC_MIN - 1) / CHUNK_ALLOC_MIN;
+
+	struct _starpu_chunk *chunk;
+	int prevblock, block;
+	int available_max;
+	struct block *bitmap;
+
+	STARPU_PTHREAD_MUTEX_LOCK(&chunk_mutex[dst_node]);
+
+	/* Try to find a big enough segment among the chunks */
+	for (chunk = _starpu_chunk_list_begin(&chunks[dst_node]);
+	     chunk != _starpu_chunk_list_end(&chunks[dst_node]);
+	     chunk = _starpu_chunk_list_next(chunk))
+	{
+		if (chunk->available_max < nblocks)
+			continue;
+
+		bitmap = chunk->bitmap;
+		available_max = 0;
+		for (prevblock = block = 0;
+			block != -1;
+			prevblock = block, block = bitmap[prevblock].next)
+		{
+			STARPU_ASSERT(block >= 0 && block <= CHUNK_NBLOCKS);
+			int length = bitmap[block].length;
+			if (length >= nblocks) {
+
+				if (length >= 2*nblocks)
+				{
+					/* This one this has quite some room,
+					 * put it front, to make finding it
+					 * easier next time. */
+					_starpu_chunk_list_erase(&chunks[dst_node], chunk);
+					_starpu_chunk_list_push_front(&chunks[dst_node], chunk);
+				}
+				if (chunk->available == CHUNK_NBLOCKS)
+					/* This one was empty, it's not empty any more */
+					nfreechunks[dst_node]--;
+				goto found;
+			}
+			if (length > available_max)
+				available_max = length;
+		}
+
+		/* Didn't find a big enough segment in this chunk, its
+		 * available_max is out of date */
+		chunk->available_max = available_max;
+	}
+
+	/* Didn't find a big enough segment, create another chunk.  */
+	chunk = _starpu_new_chunk(dst_node);
+	if (!chunk)
+	{
+		/* Really no memory any more, fail */
+		STARPU_PTHREAD_MUTEX_UNLOCK(&chunk_mutex[dst_node]);
+		errno = ENOMEM;
+		return 0;
+	}
+
+	/* And make it easy to find. */
+	_starpu_chunk_list_push_front(&chunks[dst_node], chunk);
+	bitmap = chunk->bitmap;
+	prevblock = 0;
+	block = 1;
+
+found:
+
+	chunk->available -= nblocks;
+	STARPU_ASSERT(bitmap[block].length >= nblocks);
+	STARPU_ASSERT(block <= CHUNK_NBLOCKS);
+	if (bitmap[block].length == nblocks)
+	{
+		/* Fits exactly, drop this segment from the skip list */
+		bitmap[prevblock].next = bitmap[block].next;
+	}
+	else
+	{
+		/* Still some room */
+		STARPU_ASSERT(block + nblocks <= CHUNK_NBLOCKS);
+		bitmap[prevblock].next = block + nblocks;
+		bitmap[block + nblocks].length = bitmap[block].length - nblocks;
+		bitmap[block + nblocks].next = bitmap[block].next;
+	}
+
+	STARPU_PTHREAD_MUTEX_UNLOCK(&chunk_mutex[dst_node]);
+
+	return chunk->base + (block-1) * CHUNK_ALLOC_MIN;
 }
 
-//Argo modified
 void
 starpu_free_on_node(unsigned dst_node, uintptr_t addr, size_t size)
 {
-	dynamic_free(addr);
+
+	//#ifdef ARGO
+	//dynamic_free(addr);
+	collective_free(addr);
 	return;
+	//#endif
+	/* Big allocation, deallocate normally */
+	if (size > CHUNK_ALLOC_MAX || starpu_node_get_kind(dst_node) != STARPU_CUDA_RAM)
+	{
+		_starpu_free_on_node(dst_node, addr, size);
+		return;
+	}
+
+	struct _starpu_chunk *chunk;
+
+	/* Round up allocation to block size */
+	int nblocks = (size + CHUNK_ALLOC_MIN - 1) / CHUNK_ALLOC_MIN;
+
+	STARPU_PTHREAD_MUTEX_LOCK(&chunk_mutex[dst_node]);
+	for (chunk = _starpu_chunk_list_begin(&chunks[dst_node]);
+	     chunk != _starpu_chunk_list_end(&chunks[dst_node]);
+	     chunk = _starpu_chunk_list_next(chunk))
+		if (addr >= chunk->base && addr < chunk->base + CHUNK_SIZE)
+			break;
+	STARPU_ASSERT(chunk != _starpu_chunk_list_end(&chunks[dst_node]));
+
+	struct block *bitmap = chunk->bitmap;
+	int block = ((addr - chunk->base) / CHUNK_ALLOC_MIN) + 1, prevblock, nextblock;
+
+	/* Look for free segment just before this one */
+	for (prevblock = 0;
+		prevblock != -1;
+		prevblock = nextblock)
+	{
+		STARPU_ASSERT(prevblock >= 0 && prevblock <= CHUNK_NBLOCKS);
+		nextblock = bitmap[prevblock].next;
+		STARPU_ASSERT_MSG(nextblock != block, "It seems data 0x%lx (size %u) on node %u is being freed a second time\n", (unsigned long) addr, (unsigned) size, dst_node);
+		if (nextblock > block || nextblock == -1)
+			break;
+	}
+	STARPU_ASSERT(prevblock != -1);
+
+	chunk->available += nblocks;
+
+	/* Insert in free segments list */
+	bitmap[block].next = nextblock;
+	bitmap[prevblock].next = block;
+	bitmap[block].length = nblocks;
+
+	STARPU_ASSERT(nextblock >= -1 && nextblock <= CHUNK_NBLOCKS);
+	if (nextblock == block + nblocks)
+	{
+		/* This freed segment is just before a free segment, merge them */
+		bitmap[block].next = bitmap[nextblock].next;
+		bitmap[block].length += bitmap[nextblock].length;
+
+		if (bitmap[block].length > chunk->available_max)
+			chunk->available_max = bitmap[block].length;
+	}
+
+	if (prevblock > 0 && prevblock + bitmap[prevblock].length == block)
+	{
+		/* This free segment is just after a free segment, merge them */
+		bitmap[prevblock].next = bitmap[block].next;
+		bitmap[prevblock].length += bitmap[block].length;
+
+		if (bitmap[prevblock].length > chunk->available_max)
+			chunk->available_max = bitmap[prevblock].length;
+
+		block = prevblock;
+	}
+
+	if (chunk->available == CHUNK_NBLOCKS)
+	{
+		/* This chunk is now empty, but avoid chunk free/alloc
+		 * ping-pong by keeping some of these.  */
+		if (nfreechunks[dst_node] >= 1) {
+			/* We already have free chunks, release this one */
+			_starpu_free_on_node(dst_node, chunk->base, CHUNK_SIZE);
+			_starpu_chunk_list_erase(&chunks[dst_node], chunk);
+			free(chunk);
+		} else
+			nfreechunks[dst_node]++;
+	}
+	else
+	{
+		/* Freed some room, put this first in chunks list */
+		_starpu_chunk_list_erase(&chunks[dst_node], chunk);
+		_starpu_chunk_list_push_front(&chunks[dst_node], chunk);
+	}
+
+	STARPU_PTHREAD_MUTEX_UNLOCK(&chunk_mutex[dst_node]);
 }

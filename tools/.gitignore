@@ -1,1 +1,9 @@
 /.deps
+starpu_workers_activity*
+starpu_paje_*
+starpu_lp2paje*
+starpu_codelet_*
+mvsc/*
+starpu_fxt_tool
+starpu_fxt_stats
+Makefile

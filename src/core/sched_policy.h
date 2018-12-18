@@ -69,5 +69,5 @@ extern struct starpu_sched_policy _starpu_sched_eager_policy;
 extern struct starpu_sched_policy _starpu_sched_parallel_heft_policy;
 extern struct starpu_sched_policy _starpu_sched_peager_policy;
 
-
+void _starpu_print_idle_time();
 #endif // __SCHED_POLICY_H__

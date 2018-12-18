@@ -390,7 +390,7 @@ static int starpu_handle_data_request(struct _starpu_data_request *r, unsigned m
 
 	/* perform the transfer */
 	/* the header of the data must be locked by the worker that submitted the request */
-
+	_STARPU_DISP("TRANSFE\n");
 	r->retval = _starpu_driver_copy_data_1_to_1(handle, src_replicate,
 						    dst_replicate, !(r_mode & STARPU_R), r, may_alloc);
 
@@ -686,6 +686,7 @@ static void _handle_pending_node_data_requests(unsigned src_node, unsigned force
 		/* wait until the transfer is terminated */
 		if (force)
 		{
+	_STARPU_DISP("TRANSFEr2\n");
 			_starpu_driver_wait_request_completion(&r->async_channel);
 			starpu_handle_data_request_completion(r);
 		}

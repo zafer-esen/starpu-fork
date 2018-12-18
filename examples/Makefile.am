@@ -168,6 +168,7 @@ endif
 
 examplebin_PROGRAMS +=				\
 	basic_examples/hello_world		\
+	basic_examples/hello_world2		\
 	basic_examples/vector_scal		\
 	basic_examples/mult			\
 	basic_examples/block			\
@@ -253,6 +254,7 @@ endif
 
 STARPU_EXAMPLES +=				\
 	basic_examples/hello_world		\
+	basic_examples/hello_world2		\
 	basic_examples/vector_scal		\
 	basic_examples/mult			\
 	basic_examples/block			\

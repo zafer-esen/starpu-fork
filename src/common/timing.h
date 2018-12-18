@@ -33,6 +33,7 @@
 
 void _starpu_timing_init(void);
 void _starpu_clock_gettime(struct timespec *ts);
+//void starpu_clear_dsm_state(void);
 
 #endif /* TIMING_H */
 

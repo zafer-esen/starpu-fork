@@ -142,20 +142,11 @@ void _starpu_driver_update_job_feedback(struct _starpu_job *j, struct _starpu_wo
 				profiling_info->power_consumed);
 			updated =  1;
 		}
-
-#ifdef ARGO_DEBUG
-		printf("measured :%lf, predtrans:%lf, pred:%lf\n",measured, j->task->predicted_transfer, j->task->predicted);
-#endif
-		/*Update performance models if not cached in argo, and not local memory
-			and we didnt prefetch it, 
-			meaning its a 'normal' transfer over runtime, taking cache misses over the network.
-			This should therefor be a good baseline for performance model.
-			(Predicted_transfer can give hints on what type of task this is as well)
-		*/
-		 if (//j->task->predicted_transfer > 40 && j->task->predicted_transfer < 44 &&
-		 		 j->argo_cached==0 &&
-		 		 j->argo_prefetched==0 &&
-		 		 calibrate_model)
+		//		printf("measured :%lf, predtrans:%lf, pred:%lf\n",measured, j->task->predicted_transfer, j->task->predicted);
+		 /* if (//j->task->predicted_transfer > 40 && j->task->predicted_transfer < 44 && */
+		 /* 		 j->argo_cached==0 &&  */
+		 /* 		 j->argo_prefetched==0 &&  */
+		 /* 		 calibrate_model) */
 		_starpu_update_perfmodel_history(j, j->task->cl->model,  perf_arch, worker_args->devid, measured,j->nimpl);
 
 

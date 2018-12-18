@@ -25,6 +25,8 @@
 #include <core/debug.h>
 
 static int use_prefetch = 0;
+static double idle[STARPU_NMAXWORKERS];
+static double idle_start[STARPU_NMAXWORKERS];
 
 int starpu_get_prefetch_flag(void)
 {
@@ -190,6 +192,7 @@ void _starpu_deinit_sched_policy(struct _starpu_sched_ctx *sched_ctx)
 
 static void _starpu_push_task_on_specific_worker_notify_sched(struct starpu_task *task, struct _starpu_worker *worker, int workerid, int perf_workerid)
 {
+	//	_STARPU_DISP("starpu sched push task on specific worker + notify\n");
 	/* if we push a task on a specific worker, notify all the sched_ctxs the worker belongs to */
 	struct _starpu_sched_ctx *sched_ctx;
 	struct _starpu_sched_ctx_list *l = NULL;
@@ -210,6 +213,7 @@ static void _starpu_push_task_on_specific_worker_notify_sched(struct starpu_task
  * each worker of the combination. */
 static int _starpu_push_task_on_specific_worker(struct starpu_task *task, int workerid)
 {
+	//	_STARPU_DISP("starpu sched push task on specific worker\n");
 	int nbasic_workers = (int)starpu_worker_get_count();
 
 	/* Is this a basic worker or a combined worker ? */
@@ -327,7 +331,7 @@ static int _starpu_push_task_on_specific_worker(struct starpu_task *task, int wo
 
 int _starpu_push_task(struct _starpu_job *j)
 {
-
+	//	_STARPU_DISP("starpu_push_task1\n");
 	if(j->task->prologue_callback_func)
 		j->task->prologue_callback_func(j->task->prologue_callback_arg);
 
@@ -340,7 +344,7 @@ int _starpu_push_task(struct _starpu_job *j)
 
 	_starpu_increment_nready_tasks_of_sched_ctx(task->sched_ctx, task->flops);
 	task->status = STARPU_TASK_READY;
-
+	//	_STARPU_DISP("starpu_push_task2\n");
 #ifdef HAVE_AYUDAME_H
 	if (AYU_event)
 	{
@@ -372,6 +376,7 @@ int _starpu_push_task(struct _starpu_job *j)
 			return 0;
 		}
 	}
+	//	_STARPU_DISP("starpu_push_task3\n");
 
 	/* in case there is no codelet associated to the task (that's a control
 	 * task), we directly execute its callback and enforce the
@@ -382,16 +387,18 @@ int _starpu_push_task(struct _starpu_job *j)
 		_STARPU_LOG_OUT_TAG("handle_job_termination");
 		return 0;
 	}
-
+	//	//_STARPU_DISP("starpu_push_task4\n");
 	ret = _starpu_push_task_to_workers(task);
 	if (ret == -EAGAIN)
 		/* pushed to empty context, that's fine */
 		ret = 0;
+	//_STARPU_DISP("starpu_push_task5\n");
 	return ret;
 }
 
 int _starpu_push_task_to_workers(struct starpu_task *task)
 {
+	//_STARPU_DISP("starpu sched push task to workers\n");
 	struct _starpu_sched_ctx *sched_ctx = _starpu_get_sched_ctx_struct(task->sched_ctx);
 	unsigned nworkers = 0;
 
@@ -484,6 +491,7 @@ int _starpu_push_task_to_workers(struct starpu_task *task)
  */
 int starpu_push_task_end(struct starpu_task *task)
 {
+	//_STARPU_DISP("starpu sched push task end\n");
 	_starpu_profiling_set_task_push_end_time(task);
 	task->scheduled = 1;
 	return 0;
@@ -513,6 +521,7 @@ struct starpu_task *_starpu_create_conversion_task(starpu_data_handle_t handle,
 struct starpu_task *_starpu_create_conversion_task_for_arch(starpu_data_handle_t handle,
 						   enum starpu_node_kind node_kind)
 {
+	//_STARPU_DISP("starpu create conversion\n");
 	struct starpu_task *conversion_task;
 
 #if defined(STARPU_USE_OPENCL) || defined(STARPU_USE_CUDA) || defined(STARPU_SIMGRID)
@@ -590,7 +599,8 @@ struct starpu_task *_starpu_create_conversion_task_for_arch(starpu_data_handle_t
 
 static
 struct _starpu_sched_ctx* _get_next_sched_ctx_to_pop_into(struct _starpu_worker *worker)
-{	
+{
+	//_STARPU_DISP("starpu next sched ctx to pop into\n");	
 	struct _starpu_sched_ctx_list *l = NULL;
 	if(!worker->reverse_phase)
 	{
@@ -624,6 +634,7 @@ struct _starpu_sched_ctx* _get_next_sched_ctx_to_pop_into(struct _starpu_worker 
 
 struct starpu_task *_starpu_pop_task(struct _starpu_worker *worker)
 {
+	//	//_STARPU_DISP("starpu sched pop task1\n");
 	struct starpu_task *task;
 	int worker_id;
 	unsigned node;
@@ -639,7 +650,7 @@ pick:
 	/* perhaps there is some local task to be executed first */
 	task = _starpu_pop_local_task(worker);
 
-
+	//	//_STARPU_DISP("starpu sched pop task2\n");
 	/* get tasks from the stacks of the strategy */
 	if(!task)
 	{		
@@ -649,18 +660,22 @@ pick:
 		int i;
 		for(i = 0; i < STARPU_NMAX_SCHED_CTXS; i++)
 			been_here[i] = 0;
-
+		//	//_STARPU_DISP("starpu sched pop task3\n");
 		while(!task)
 #endif
 		{
-			if(worker->nsched_ctxs == 1)
+			//	//_STARPU_DISP("starpu sched pop task4\n");
+	if(worker->nsched_ctxs == 1){
 				sched_ctx = _starpu_get_initial_sched_ctx();
+				//	//_STARPU_DISP("IF starpu sched pop task5\n");
+	}
 			else
 			{
+				//		//_STARPU_DISP("ELSE starpu sched pop task5\n");
 				while(1)
 				{
 					sched_ctx = _get_next_sched_ctx_to_pop_into(worker);
-					
+
 					if(worker->removed_from_ctx[sched_ctx->id] == 1 && worker->shares_tasks_lists[sched_ctx->id] == 1)
 					{
 						_starpu_worker_gets_out_of_ctx(sched_ctx->id, worker);
@@ -672,7 +687,7 @@ pick:
 				}
 			}
 
-
+			////_STARPU_DISP("endafter while starpu sched pop task5\n");
 			if(sched_ctx && sched_ctx->id != STARPU_NMAX_SCHED_CTXS)
 			{
 				if (sched_ctx->sched_policy && sched_ctx->sched_policy->pop_task)
@@ -681,7 +696,7 @@ pick:
 					_starpu_pop_task_end(task);
 				}
 			}
-			
+				////_STARPU_DISP("starpu sched pop task6\n");
 			if(!task)
 			{
 				/* it doesn't matter if it shares tasks list or not in the scheduler,
@@ -712,9 +727,19 @@ pick:
 		}
 	  }
 
-
+	////_STARPU_DISP("starpu sched pop task7\n");
 	if (!task)
+	{
+		idle_start[worker->workerid] = starpu_timing_now();
 		return NULL;
+	}
+
+	if(idle_start[worker->workerid] != 0.0)
+	{
+		double idle_end = starpu_timing_now();
+		idle[worker->workerid] += (idle_end - idle_start[worker->workerid]);
+		idle_start[worker->workerid] = 0.0;
+	}
 
 
 
@@ -800,6 +825,7 @@ profiling:
 
 struct starpu_task *_starpu_pop_every_task(struct _starpu_sched_ctx *sched_ctx)
 {
+	//_STARPU_DISP("starpu_wait sched pop everyhook1\n");
 	struct starpu_task *task = NULL;
 	STARPU_ASSERT(sched_ctx->sched_policy->pop_every_task);
 
@@ -815,6 +841,7 @@ struct starpu_task *_starpu_pop_every_task(struct _starpu_sched_ctx *sched_ctx)
 
 void _starpu_sched_pre_exec_hook(struct starpu_task *task)
 {
+	//_STARPU_DISP("starpu_wait sched pre exect hook1\n");
 	struct _starpu_sched_ctx *sched_ctx = _starpu_get_sched_ctx_struct(task->sched_ctx);
 	if (sched_ctx->sched_policy->pre_exec_hook)
 	{
@@ -826,6 +853,7 @@ void _starpu_sched_pre_exec_hook(struct starpu_task *task)
 
 void _starpu_sched_post_exec_hook(struct starpu_task *task)
 {
+	//_STARPU_DISP("starpu_wait sched post exect hook1\n");
 	struct _starpu_sched_ctx *sched_ctx = _starpu_get_sched_ctx_struct(task->sched_ctx);
 
 	if (sched_ctx->sched_policy->post_exec_hook)
@@ -841,9 +869,9 @@ void _starpu_wait_on_sched_event(void)
 	struct _starpu_worker *worker = _starpu_get_local_worker_key();
 
 	STARPU_PTHREAD_MUTEX_LOCK(&worker->sched_mutex);
-
+	//_STARPU_DISP("starpu_wait on sched event1\n");
 	_starpu_handle_all_pending_node_data_requests(worker->memory_node);
-
+	//_STARPU_DISP("starpu_wait on sched event2\n");
 	if (_starpu_machine_is_running())
 	{
 #ifndef STARPU_NON_BLOCKING_DRIVERS
@@ -853,6 +881,7 @@ void _starpu_wait_on_sched_event(void)
 	}
 
 	STARPU_PTHREAD_MUTEX_UNLOCK(&worker->sched_mutex);
+	//_STARPU_DISP("starpu_wait on sched event3\n");
 }
 
 /* The scheduling policy may put tasks directly into a worker's local queue so
@@ -862,7 +891,21 @@ void _starpu_wait_on_sched_event(void)
  * a FIFO ordering. */
 int starpu_push_local_task(int workerid, struct starpu_task *task, int prio)
 {
+	//_STARPU_DISP("starpu_push local task1\n");
 	struct _starpu_worker *worker = _starpu_get_worker_struct(workerid);
 
 	return  _starpu_push_local_task(worker, task, prio);
 }
+
+
+void _starpu_print_idle_time()
+{
+	double all_idle = 0.0;
+	int i = 0;
+	for(i = 0; i < STARPU_NMAXWORKERS; i++){
+		printf("Worker:%d idle:%lf\n",i,idle[i]);
+		all_idle += idle[i];
+	}
+	printf("Totalidle:%lf, average idle worker:%lf\n",all_idle,all_idle/i);
+}
+

@@ -135,6 +135,7 @@ void _starpu_increment_nsubmitted_tasks_of_sched_ctx(unsigned sched_ctx_id);
 int _starpu_get_nsubmitted_tasks_of_sched_ctx(unsigned sched_ctx_id);
 int _starpu_check_nsubmitted_tasks_of_sched_ctx(unsigned sched_ctx_id);
 
+//int starpu_sched_ctx_get_nready_tasks(unsigned sched_ctx_id);
 void _starpu_decrement_nready_tasks_of_sched_ctx(unsigned sched_ctx_id, double ready_flops);
 void _starpu_increment_nready_tasks_of_sched_ctx(unsigned sched_ctx_id, double ready_flops);
 int _starpu_wait_for_no_ready_of_sched_ctx(unsigned sched_ctx_id);

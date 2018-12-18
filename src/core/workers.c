@@ -17,6 +17,7 @@
  *
  * See the GNU Lesser General Public License in COPYING.LGPL for more details.
  */
+int test_ctr=0;
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -729,16 +730,16 @@ int starpu_init(struct starpu_conf *user_conf)
 
 	//#ifdef ARGO
 
-	argo_init(100L*1024l*1024l*1024l);//60gb global address space
-	if(argo_number_of_nodes() > 1 && argo_node_id() != 0*(argo_number_of_nodes()-1)){ //We set last node as compute so most/all mem is remote for worst case scenario
-		//if(argo_number_of_nodes() > 1 && argo_node_id() != 0){
-		_STARPU_DISP("argo memnodes stuck here\n");
-		argo_finalize();
-		exit(EXIT_SUCCESS);
-	}
-	else{
-		_STARPU_DISP("INITED ARGO - i am compute node :%d\n", argo_node_id());
-	}
+	argo_init(1L*1024l*1024l*1024l);//1gb global address space
+	/* if(argo_number_of_nodes() > 1 && argo_node_id() != 0*(argo_number_of_nodes()-1)){ //We set last node as compute so most/all mem is remote for worst case scenario */
+	/* 	//if(argo_number_of_nodes() > 1 && argo_node_id() != 0){ */
+	/* 	_STARPU_DISP("argo memnodes stuck here\n"); */
+	/* 	argo_finalize(); */
+	/* 	exit(EXIT_SUCCESS); */
+	/* } */
+	/* else{ */
+	/* 	_STARPU_DISP("INITED ARGO - i am compute node :%d\n", argo_node_id()); */
+	/* } */
 	//#endif
 
 
@@ -860,14 +861,15 @@ int starpu_init(struct starpu_conf *user_conf)
 	}
 
 	_starpu_init_all_sched_ctxs(&config);
+	
 	_starpu_init_progression_hooks();
-
+	
 	_starpu_init_tags();
-
+	
 #ifdef STARPU_USE_FXT
 	_starpu_init_fxt_profiling(config.conf.trace_buffer_size);
 #endif
-
+	
 	_starpu_open_debug_logfile();
 
 	_starpu_data_interface_init();
@@ -877,8 +879,9 @@ int starpu_init(struct starpu_conf *user_conf)
 	_starpu_profiling_init();
 
 	_starpu_load_bus_performance_files();
-
+	argo_barrier(1);printf("argo test:%d nodeid:%d\n",test_ctr++, argo_node_id());
 	ret = _starpu_build_topology(&config);
+	argo_barrier(1);printf("argo test:%d nodeid:%d\n",test_ctr++, argo_node_id());
 	if (ret)
 	{
 		starpu_perfmodel_free_sampling_directories();
@@ -1111,7 +1114,8 @@ void starpu_shutdown(void)
 		return;
 	}
 
-		argo_finalize();
+	argo_barrier(1);
+	argo_finalize();
 
 
 	/* We're last */
