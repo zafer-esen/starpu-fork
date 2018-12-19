@@ -418,6 +418,17 @@ void _starpu_task_check_deprecated_fields(struct starpu_task *task)
 	}
 }
 
+int should_execute_on_node(struct starpu_task *task){
+	  static unsigned int task_count = 0; //this will be only used during mod task assignment
+	  int ret;
+	  int node_id = argo_node_id();
+
+	  int num_nodes = argo_number_of_nodes();
+	  ret = ((task_count % num_nodes) == node_id) ? 1 : 0;
+	  task_count = (task_count + 1) % num_nodes;
+	  return ret;
+	}
+
 /* application should submit new tasks to StarPU through this function */
 int starpu_task_submit(struct starpu_task *task)
 {
@@ -426,6 +437,8 @@ int starpu_task_submit(struct starpu_task *task)
 	STARPU_ASSERT_MSG(task->magic == 42, "Tasks must be created with starpu_task_create, or initialized with starpu_task_init.");
 
 	int ret;
+	if (!should_execute_on_node(task)) return 0;
+
 	unsigned is_sync = task->synchronous;
 	starpu_task_bundle_t bundle = task->bundle;
 
