@@ -82,11 +82,11 @@ int main(int argc, char **argv)
 	unsigned long alloc_size = 800UL*1024UL*1024UL;
 
 	printf("%d: StarPU init complete 2\n",argo_node_id());
-	printf("%d: Available mempool: %lu MB\n",argo_node_id(),argo_get_avail()>>20);
+//	printf("%d: Available mempool: %lu MB\n",argo_node_id(),argo_get_avail()>>20);
 	printf("%d: Calling starpu_malloc with size %lu MB\n",argo_node_id(),alloc_size>>20);
 	starpu_malloc((void **)(&A), alloc_size);//(size_t)dim*dim*sizeof(char));
 	printf("%d: Starpu_malloc complete, A = 0x%lx\n",argo_node_id(), A);
-	printf("%d: Available mempool: %lu MB\n",argo_node_id(),argo_get_avail()>>20);
+//	printf("%d: Available mempool: %lu MB\n",argo_node_id(),argo_get_avail()>>20);
 	argo_barrier(1);
 	if(argo_node_id()==0)
 		A[0] = 42;
@@ -104,8 +104,9 @@ int main(int argc, char **argv)
 	 * submitted to the scheduler until the starpu_task_submit function is
 	 * called */
 	int num_nodes = argo_number_of_nodes();
+	int i = 0;
 	tasks = malloc(num_nodes*sizeof(struct starpu_task *));
-	for(int i=0; i<num_nodes; ++i)
+	for(i=0; i<num_nodes; ++i)
 		tasks[i] = starpu_task_create();
 
 	starpu_codelet_init(&cl);
@@ -117,7 +118,7 @@ int main(int argc, char **argv)
 	cl.nbuffers = 0;
 	cl.name="hello";
 
-	for(int i=0; i<num_nodes; ++i){
+	for(i=0; i<num_nodes; ++i){
 		/* the task uses codelet "cl" */
 		tasks[i]->cl = &cl;
 

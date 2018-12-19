@@ -1,6 +1,6 @@
 #ARGO_PATH="/proj/snic2016-7-69/argodsm"
-#ARGO_PATH="/proj/snic2017-7-43/argodsm-stage"
-ARGO_PATH="/home/zafer/projargo/argo-magnus/argodsm"
+ARGO_PATH="/proj/snic2017-7-43/argodsm-stage"
+#ARGO_PATH="/home/zafer/projargo/argo-magnus/argodsm"
 #ARGO_PATH=$ARGO_PATH:"/proj/snic2016-7-69/argodsm-stage/build"
 #ARGO_PATH=$ARGO_PATH:"/proj/snic2016-7-69/argodsm-stage/src"
 #FXT_PATH="/proj/snic2016-7-69/fxt/build"

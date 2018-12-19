@@ -730,7 +730,7 @@ int starpu_init(struct starpu_conf *user_conf)
 
 	//#ifdef ARGO
 
-	argo_init(1L*1024l*1024l*1024l);//1gb global address space
+	argo_init(20L*1024l*1024l*1024l);//1gb global address space
 	/* if(argo_number_of_nodes() > 1 && argo_node_id() != 0*(argo_number_of_nodes()-1)){ //We set last node as compute so most/all mem is remote for worst case scenario */
 	/* 	//if(argo_number_of_nodes() > 1 && argo_node_id() != 0){ */
 	/* 	_STARPU_DISP("argo memnodes stuck here\n"); */
