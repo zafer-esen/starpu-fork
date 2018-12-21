@@ -62,6 +62,20 @@ void cpu_func(void *buffers[], void *cl_arg)
 	FPRINTF(stdout, "Hello world (params = {%i, %f} )\n", params->i, params->f);
 }
 
+static struct starpu_task * create_task(starpu_tag_t tag, struct starpu_codelet* cl)
+{
+	struct params params = {1, 2.0f};
+	struct starpu_task *task = starpu_task_create();
+	task->cl_arg = &params;
+	task->cl_arg_size = sizeof(params);
+	task->use_tag = 1;
+	task->tag_id = tag;
+	task->callback_func = callback_func;
+	task->callback_arg = (void*) (uintptr_t) 0x42+tag;
+	task->cl = cl;
+	return task;
+}
+
 int main(int argc, char **argv)
 {
 	struct starpu_codelet cl;
@@ -147,6 +161,14 @@ int main(int argc, char **argv)
 		if (ret == -ENODEV) goto enodev;
 		STARPU_CHECK_RETURN_VALUE(ret, "starpu_task_submit");
 	}
+
+	starpu_tag_t tag1 = 100, tag2=101;
+	struct starpu_task *task1 = create_task(tag1, &cl);
+	struct starpu_task *task2 = create_task(tag2, &cl);
+	starpu_tag_declare_deps(tag2, 1, tag1);
+	starpu_task_submit(task1);
+	starpu_task_submit(task2);
+	starpu_tag_wait(tag2);
 
 	/* terminate StarPU: statistics and other debug outputs are not
 	 * guaranteed to be generated unless this function is called. Once it
