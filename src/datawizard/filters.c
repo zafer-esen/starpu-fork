@@ -292,11 +292,14 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 	unsigned sizes[root_handle->nchildren];
 	void *ptr;
 
+//	printf("starpu_data_unpartition 1\n");
+
 	_STARPU_TRACE_START_UNPARTITION(root_handle, gathering_node);
 	_starpu_spin_lock(&root_handle->header_lock);
 
 	STARPU_ASSERT_MSG(root_handle->nchildren != 0, "data %p is not partitioned, can not unpartition it", root_handle);
 
+//	printf("starpu_data_unpartition 2\n");
 	/* first take all the children lock (in order !) */
 	for (child = 0; child < root_handle->nchildren; child++)
 	{
@@ -310,6 +313,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 #ifdef STARPU_DEVEL
 #warning TODO: _starpu_fetch_data_on_node should be doing it
 #endif
+		//printf("starpu_data_unpartition 3\n");
 		if (_starpu_data_is_multiformat_handle(child_handle) &&
 			starpu_node_get_kind(child_handle->mf_node) != STARPU_CPU_RAM)
 		{
@@ -327,7 +331,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 			if (_starpu_task_submit_internally(task) != 0)
 				_STARPU_ERROR("Could not submit the conversion task while unpartitionning\n");
 		}
-
+		//printf("starpu_data_unpartition 4\n");
 		int ret;
 		/* for now we pretend that the RAM is almost unlimited and that gathering
 		 * data should be possible from the node that does the unpartionning ... we
@@ -341,7 +345,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 		_starpu_spin_lock(&child_handle->header_lock);
 		child_handle->busy_waiting = 1;
 		_starpu_spin_unlock(&child_handle->header_lock);
-
+		//printf("starpu_data_unpartition 5\n");
 		/* Wait for all requests to finish (notably WT requests) */
 		STARPU_PTHREAD_MUTEX_LOCK(&child_handle->busy_mutex);
 		while (1)
@@ -356,6 +360,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 			 * after decrementing busy_count */
 			STARPU_PTHREAD_COND_WAIT(&child_handle->busy_cond, &child_handle->busy_mutex);
 		}
+		//printf("starpu_data_unpartition 6\n");
 		STARPU_PTHREAD_MUTEX_UNLOCK(&child_handle->busy_mutex);
 
 		_starpu_spin_lock(&child_handle->header_lock);
@@ -363,7 +368,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 		sizes[child] = _starpu_data_get_size(child_handle);
 
 		_starpu_data_unregister_ram_pointer(child_handle);
-
+		//printf("starpu_data_unpartition 7\n");
 		for (worker = 0; worker < nworkers; worker++)
 		{
 			struct _starpu_data_replicate *local = &child_handle->per_worker[worker];
@@ -375,6 +380,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 		_starpu_memory_stats_free(child_handle);
 	}
 
+	//printf("starpu_data_unpartition 8\n");
 	ptr = starpu_data_handle_to_pointer(root_handle, 0);
 	if (ptr != NULL)
 		_starpu_data_register_ram_pointer(root_handle, ptr);
@@ -392,7 +398,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 	 * STARPU_OWNER */
 
 	unsigned nvalids = 0;
-
+	//printf("starpu_data_unpartition 9\n");
 	/* still valid ? */
 	for (node = 0; node < STARPU_MAXNODES; node++)
 	{
@@ -432,7 +438,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 		if (isvalid)
 			nvalids++;
 	}
-
+	//printf("starpu_data_unpartition 10\n");
 	/* either shared or owned */
 	STARPU_ASSERT(nvalids > 0);
 
@@ -451,7 +457,7 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 		_starpu_spin_unlock(&child_handle->header_lock);
 		_starpu_spin_destroy(&child_handle->header_lock);
 	}
-
+	//printf("starpu_data_unpartition 11\n");
 	for (child = 0; child < root_handle->nchildren; child++)
 	{
 		starpu_data_handle_t child_handle = starpu_data_get_child(root_handle, child);
@@ -465,13 +471,14 @@ void starpu_data_unpartition(starpu_data_handle_t root_handle, unsigned gatherin
 	starpu_data_handle_t children = root_handle->children;
 	root_handle->children = NULL;
 	root_handle->nchildren = 0;
-
+	//printf("starpu_data_unpartition 12\n");
 	/* now the parent may be used again so we release the lock */
 	_starpu_spin_unlock(&root_handle->header_lock);
-
+	//printf("starpu_data_unpartition 13\n");
 	free(children);
 
 	_STARPU_TRACE_END_UNPARTITION(root_handle, gathering_node);
+	//printf("starpu_data_unpartition 14\n");
 }
 
 /* each child may have his own interface type */

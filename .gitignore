@@ -351,3 +351,6 @@ doc/doxygen/starpu_config.h
 .project
 .settings/
 *world2
+core.*
+*.out
+*.#*
