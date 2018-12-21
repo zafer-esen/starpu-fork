@@ -23,6 +23,7 @@
  */
 
 #include "cholesky.h"
+#include "argo.h"
 
 #if defined(STARPU_USE_CUDA) && defined(STARPU_HAVE_MAGMA)
 #include "magma.h"
@@ -199,6 +200,7 @@ static void _cholesky(starpu_data_handle_t dataA, unsigned nblocks)
 	/* create all the DAG nodes */
 	unsigned i,j,k;
 
+	printf("in _cholesky...\n");
 	start = starpu_timing_now();
 
 	for (k = 0; k < nblocks; k++)
@@ -231,7 +233,8 @@ static void _cholesky(starpu_data_handle_t dataA, unsigned nblocks)
 			}
 		}
 	}
-
+	printf("created tasks...\n");
+	
 	/* schedule the codelet */
 	int ret = starpu_task_submit(entry_task);
         if (STARPU_UNLIKELY(ret == -ENODEV))
@@ -240,12 +243,12 @@ static void _cholesky(starpu_data_handle_t dataA, unsigned nblocks)
                 exit(0);
         }
 
-
 	/* stall the application until the end of computations */
+	printf("tag_wait 1\n");
 	starpu_tag_wait(TAG11(nblocks-1));
-
+	printf("tag_wait 2\n");
 	starpu_data_unpartition(dataA, 0);
-
+	printf("%d: data unpartition 2\n",argo_node_id());
 	end = starpu_timing_now();
 
 
@@ -275,7 +278,9 @@ static int initialize_system(float **A, unsigned dim, unsigned pinned)
 #ifndef STARPU_SIMGRID
 	if (pinned)
 	{
+		printf("starpu_malloc 1\n");
 		starpu_malloc((void **)A, (size_t)dim*dim*sizeof(float));
+		printf("starpu_malloc 2\n");
 	}
 	else
 	{
@@ -291,8 +296,9 @@ static void cholesky(float *matA, unsigned size, unsigned ld, unsigned nblocks)
 
 	/* monitor and partition the A matrix into blocks :
 	 * one block is now determined by 2 unsigned (i,j) */
+	printf("starpu_matrix_data_register 1...\n");
 	starpu_matrix_data_register(&dataA, 0, (uintptr_t)matA, ld, size, size, sizeof(float));
-
+	printf("starpu_matrix_data_register 2...\n");
 	starpu_data_set_sequential_consistency_flag(dataA, 0);
 
 	struct starpu_data_filter f =
@@ -307,11 +313,15 @@ static void cholesky(float *matA, unsigned size, unsigned ld, unsigned nblocks)
 		.nchildren = nblocks
 	};
 
+	printf("starpu_data_map_filters 1...\n");
 	starpu_data_map_filters(dataA, 2, &f, &f2);
+	printf("starpu_data_map_filters 2...\n");
 
 	_cholesky(dataA, nblocks);
 
+	printf("starpu_data_unregister 1...\n");
 	starpu_data_unregister(dataA);
+	printf("starpu_data_unregister 2...\n");
 }
 
 static void shutdown_system(float **matA, unsigned pinned)
@@ -343,14 +353,19 @@ int main(int argc, char **argv)
 
 #ifndef STARPU_SIMGRID
 	unsigned i,j;
-	for (i = 0; i < size; i++)
-	{
-		for (j = 0; j < size; j++)
+	printf("%d: init matrix data 1\n",argo_node_id());
+	if (argo_node_id() == 0){ //initialization should only be done on a single node
+		for (i = 0; i < size; i++)
 		{
-			mat[j +i*size] = (1.0f/(1.0f+i+j)) + ((i == j)?1.0f*size:0.0f);
-			/* mat[j +i*size] = ((i == j)?1.0f*size:0.0f); */
+			for (j = 0; j < size; j++)
+			{
+				mat[j +i*size] = (1.0f/(1.0f+i+j)) + ((i == j)?1.0f*size:0.0f);
+				/* mat[j +i*size] = ((i == j)?1.0f*size:0.0f); */
+			}
 		}
 	}
+	argo_barrier(1);
+	printf("%d: init matrix data 2\n",argo_node_id());
 #endif
 
 
@@ -374,8 +389,9 @@ int main(int argc, char **argv)
 	}
 #endif
 
-
+	printf("%d: call cholesky 1\n",argo_node_id());
 	cholesky(mat, size, size, nblocks);
+	printf("%d: call cholesky 2\n",argo_node_id());
 
 #ifdef CHECK_OUTPUT
 	FPRINTF(stdout, "Results :\n");

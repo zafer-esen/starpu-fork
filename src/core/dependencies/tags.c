@@ -436,6 +436,7 @@ int starpu_tag_wait_array(unsigned ntags, starpu_tag_t *id)
 
 	STARPU_PTHREAD_RWLOCK_WRLOCK(&tag_global_rwlock);
 	/* only wait the tags that are not done yet */
+	printf("starpu_tag_wait_array waiting for tags 1\n");
 	for (i = 0, current = 0; i < ntags; i++)
 	{
 		struct _starpu_tag *tag = _gettag_struct(id[i]);
@@ -453,37 +454,40 @@ int starpu_tag_wait_array(unsigned ntags, starpu_tag_t *id)
 			current++;
 		}
 	}
+	printf("starpu_tag_wait_array waiting for tags 2\n");
 	STARPU_PTHREAD_RWLOCK_UNLOCK(&tag_global_rwlock);
-
+	printf("starpu_tag_wait_array waiting for tags 3\n");
 	if (current == 0)
 	{
 		/* all deps are already fulfilled */
 		_STARPU_LOG_OUT_TAG("all deps are already fulfilled");
 		return 0;
 	}
-
+	printf("starpu_tag_wait_array waiting for tags 4\n");
 	/* there is at least one task that is not finished */
 	struct _starpu_cg *cg = create_cg_apps(current);
-
+	printf("starpu_tag_wait_array waiting for tags 5\n");
 	for (i = 0; i < current; i++)
 	{
 		_starpu_tag_add_succ(tag_array[i], cg);
 		_starpu_spin_unlock(&tag_array[i]->lock);
 	}
-
+	printf("starpu_tag_wait_array waiting for tags 6\n");
 	STARPU_PTHREAD_MUTEX_LOCK(&cg->succ.succ_apps.cg_mutex);
-
+	printf("starpu_tag_wait_array waiting for tags 7\n");
 	while (!cg->succ.succ_apps.completed)
 		STARPU_PTHREAD_COND_WAIT(&cg->succ.succ_apps.cg_cond, &cg->succ.succ_apps.cg_mutex);
-
+	printf("starpu_tag_wait_array waiting for tags 8\n");
 	STARPU_PTHREAD_MUTEX_UNLOCK(&cg->succ.succ_apps.cg_mutex);
-
+	printf("starpu_tag_wait_array waiting for tags 9\n");
 	STARPU_PTHREAD_MUTEX_DESTROY(&cg->succ.succ_apps.cg_mutex);
+	printf("starpu_tag_wait_array waiting for tags 10\n");
 	STARPU_PTHREAD_COND_DESTROY(&cg->succ.succ_apps.cg_cond);
-
+	printf("starpu_tag_wait_array waiting for tags 11\n");
 	free(cg);
-
+	printf("starpu_tag_wait_array waiting for tags 12\n");
 	_STARPU_LOG_OUT();
+	printf("starpu_tag_wait_array waiting for tags 13\n");
 	return 0;
 }
 
